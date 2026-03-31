@@ -1,0 +1,13 @@
+replicaCount: 2
+image:
+  repository: omg-collector
+  tag: v1
+  pullPolicy: Never
+
+tenant:
+  id: "Alpha-Tenant"
+  label: "alpha"
+
+service:
+  port: 80
+  targetPort: 8000

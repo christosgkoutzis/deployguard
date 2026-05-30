@@ -1,6 +1,6 @@
 replicaCount: 2
 image:
-  repository: omg-collector
+  repository: telemetry-collector
   tag: v1
   pullPolicy: Never
 

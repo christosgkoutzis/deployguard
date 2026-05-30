@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "INFO: Starting OMG-Control-Plane Setup..."
+echo "INFO: Starting control plane setup..."
 
 # Checks if a command exists
 is_installed() {
@@ -46,7 +46,7 @@ install_dependencies() {
 install_dependencies
 
 # Cluster setup: Creates a K3d cluster if it doesn't already exist
-CLUSTER_NAME="omgcp-cluster"
+CLUSTER_NAME="control-plane-cluster"
 if k3d cluster list | grep -q "$CLUSTER_NAME"; then
     echo "INFO: Cluster '$CLUSTER_NAME' already exists."
 else

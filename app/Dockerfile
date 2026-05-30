@@ -15,7 +15,7 @@ COPY main.py .
 RUN mkdir /data && chmod 777 /data
 
 # Default settings
-ENV APP_NAME="omg-telemetry-collector"
+ENV APP_NAME="telemetry-collector"
 ENV LOG_LEVEL="INFO"
 
 # Listen on port 8000

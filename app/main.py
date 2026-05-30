@@ -6,8 +6,7 @@ import datetime
 from fastapi import FastAPI, Request
 from prometheus_client import Counter, Histogram, make_asgi_app
 
-# Configuration through env vars
-APP_NAME = os.getenv("APP_NAME", "omg-telemetry-collector")
+APP_NAME = os.getenv("APP_NAME", "telemetry-collector")
 ENV = os.getenv("ENV", "local-dev")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 TENANT_ID = os.getenv("TENANT_ID", "default-tenant")
@@ -17,21 +16,19 @@ logging.basicConfig(
     stream=sys.stdout,
     format='{"time":"%(asctime)s", "level":"%(levelname)s", "app":"' + APP_NAME + '", "tenant":"%(message)s"}'
 )
-logger = logging.getLogger("omg-collector")
+logger = logging.getLogger("telemetry-collector")
 logger.setLevel(LOG_LEVEL)
 
 app = FastAPI(title=APP_NAME)
 
-# Histogram capturing latency (Time taken to process each request)
 REQUEST_LATENCY = Histogram(
-    'omg_request_latency_seconds', 
+    'telemetry_collector_request_latency_seconds', 
     'Time spent processing request', 
     ['tenant_id', 'endpoint']
 )
 
-# Counter capturing traffic (Total number of requests)
 REQUEST_COUNT = Counter(
-    'omg_requests_total', 
+    'telemetry_collector_requests_total', 
     'Total requests received', 
     ['tenant_id', 'endpoint']
 )

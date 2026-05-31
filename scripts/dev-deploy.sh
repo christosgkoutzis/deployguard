@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Usage: ./scripts/dev-deploy.sh
-# Optional: IMAGE_TAG=v2 ARGO_APP_NAME=telemetry-collector ./scripts/dev-deploy.sh
+# Optional: IMAGE_TAG=v2 ARGO_APP_NAME=telemetry-collector SKIP_VERIFY=true ./scripts/dev-deploy.sh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
@@ -10,6 +10,7 @@ IMAGE_TAG="${IMAGE_TAG:-v1}"
 ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
 ARGO_APP_NAME="${ARGO_APP_NAME:-telemetry-collector}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-180}"
+SKIP_VERIFY="${SKIP_VERIFY:-false}"
 
 for cmd in docker k3d kubectl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -48,4 +49,10 @@ kubectl -n "${ARGO_APP_NAMESPACE}" wait \
   --timeout="${ARGO_SYNC_TIMEOUT_SECONDS}s"
 
 echo "INFO: ArgoCD sync completed"
-echo "INFO: Run scripts/verify.sh to validate health and metrics"
+
+if [[ "${SKIP_VERIFY}" == "true" ]]; then
+  echo "INFO: SKIP_VERIFY=true, skipping verification"
+else
+  echo "INFO: Running verification"
+  "${REPO_ROOT}/scripts/verify.sh"
+fi

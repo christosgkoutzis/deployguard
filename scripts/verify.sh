@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Usage: ./scripts/verify.sh
-# Optional: EXPECTED_METRIC=telemetry_collector_requests_total ./scripts/verify.sh
+# Optional: RELEASE_NAMES=telemetry-collector EXPECTED_METRIC=telemetry_collector_requests_total PROM_EXPECTED_JOBS=telemetry-collector,prometheus ./scripts/verify.sh
 
 NAMESPACE="${NAMESPACE:-deployguard}"
-RELEASE_NAME="${RELEASE_NAME:-telemetry-collector}"
+RELEASE_NAMES="${RELEASE_NAMES:-telemetry-collector}"
 LOCAL_PORT="${LOCAL_PORT:-18080}"
 SERVICE_PORT="${SERVICE_PORT:-80}"
 EXPECTED_METRIC="${EXPECTED_METRIC:-telemetry_collector_requests_total}"
-SERVICE_NAME="${RELEASE_NAME}-service"
-DEPLOYMENT_NAME="${RELEASE_NAME}-deployment"
-PORT_FORWARD_LOG="${PORT_FORWARD_LOG:-/tmp/${RELEASE_NAME}-port-forward.log}"
 VERIFY_MONITORING="${VERIFY_MONITORING:-true}"
 PROM_NAMESPACE="${PROM_NAMESPACE:-monitoring}"
 PROM_RELEASE_NAME="${PROM_RELEASE_NAME:-prometheus}"
+PROM_EXPECTED_JOBS="${PROM_EXPECTED_JOBS:-telemetry-collector,prometheus}"
 PROM_SERVICE_NAME="${PROM_SERVICE_NAME:-${PROM_RELEASE_NAME}-server}"
 PROM_LOCAL_PORT="${PROM_LOCAL_PORT:-19090}"
 PROM_SERVICE_PORT="${PROM_SERVICE_PORT:-80}"
@@ -26,29 +24,63 @@ for cmd in kubectl curl; do
   fi
 done
 
-echo "INFO: Waiting for deployment rollout"
-kubectl -n "${NAMESPACE}" rollout status deployment/"${DEPLOYMENT_NAME}" --timeout=120s
+if [[ -z "${RELEASE_NAMES// }" ]]; then
+  echo "ERROR: RELEASE_NAMES must be a non-empty comma-separated list"
+  exit 1
+fi
 
-echo "INFO: Starting temporary port-forward"
-kubectl -n "${NAMESPACE}" port-forward svc/"${SERVICE_NAME}" "${LOCAL_PORT}:${SERVICE_PORT}" >"${PORT_FORWARD_LOG}" 2>&1 &
-PF_PID=$!
+IFS=',' read -r -a RELEASE_LIST <<< "${RELEASE_NAMES}"
+
 cleanup() {
-  kill "$PF_PID" >/dev/null 2>&1 || true
+  if [[ -n "${PF_PID:-}" ]]; then
+    kill "${PF_PID}" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${PROM_PF_PID:-}" ]]; then
     kill "${PROM_PF_PID}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
 
-sleep 2
+for release in "${RELEASE_LIST[@]}"; do
+  release_name="${release// /}"
 
-echo "INFO: Checking /health"
-curl -fsS "http://127.0.0.1:${LOCAL_PORT}/health" >/dev/null
+  if [[ -z "${release_name}" ]]; then
+    echo "ERROR: RELEASE_NAMES contains an empty entry"
+    exit 1
+  fi
 
-echo "INFO: Checking /metrics"
-curl -fsS "http://127.0.0.1:${LOCAL_PORT}/metrics" | grep -q "${EXPECTED_METRIC}"
+  service_name="${release_name}-service"
+  deployment_name="${release_name}-deployment"
+  port_forward_log="/tmp/${release_name}-port-forward.log"
+
+  echo "INFO: Waiting for deployment rollout for ${deployment_name}"
+  kubectl -n "${NAMESPACE}" rollout status deployment/"${deployment_name}" --timeout=120s
+
+  echo "INFO: Starting temporary port-forward for ${service_name}"
+  kubectl -n "${NAMESPACE}" port-forward svc/"${service_name}" "${LOCAL_PORT}:${SERVICE_PORT}" >"${port_forward_log}" 2>&1 &
+  PF_PID=$!
+
+  sleep 2
+
+  echo "INFO: Checking /health for ${release_name}"
+  curl -fsS "http://127.0.0.1:${LOCAL_PORT}/health" >/dev/null
+
+  echo "INFO: Checking /metrics for ${release_name}"
+  curl -fsS "http://127.0.0.1:${LOCAL_PORT}/metrics" | grep -q "${EXPECTED_METRIC}"
+
+  kill "${PF_PID}" >/dev/null 2>&1 || true
+  wait "${PF_PID}" 2>/dev/null || true
+  unset PF_PID
+done
 
 if [[ "${VERIFY_MONITORING}" == "true" ]]; then
+  if [[ -z "${PROM_EXPECTED_JOBS// }" ]]; then
+    echo "ERROR: PROM_EXPECTED_JOBS must be a non-empty comma-separated list"
+    exit 1
+  fi
+
+  IFS=',' read -r -a PROM_JOB_LIST <<< "${PROM_EXPECTED_JOBS}"
+
   if kubectl -n "${PROM_NAMESPACE}" get svc "${PROM_SERVICE_NAME}" >/dev/null 2>&1; then
     echo "INFO: Starting Prometheus port-forward"
     kubectl -n "${PROM_NAMESPACE}" port-forward svc/"${PROM_SERVICE_NAME}" "${PROM_LOCAL_PORT}:${PROM_SERVICE_PORT}" >"${PROM_PORT_FORWARD_LOG}" 2>&1 &
@@ -58,7 +90,15 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
 
     echo "INFO: Checking Prometheus targets"
     TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets")
-    echo "${TARGETS_JSON}" | grep -q '"job":"telemetry-collector"'
+    for job in "${PROM_JOB_LIST[@]}"; do
+      job_name="${job// /}"
+      if [[ -z "${job_name}" ]]; then
+        echo "ERROR: PROM_EXPECTED_JOBS contains an empty entry"
+        exit 1
+      fi
+
+      echo "${TARGETS_JSON}" | grep -q "\"job\":\"${job_name}\""
+    done
     echo "${TARGETS_JSON}" | grep -q '"health":"up"'
 
     echo "INFO: Checking Prometheus query"

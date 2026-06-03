@@ -31,6 +31,7 @@ fi
 
 IFS=',' read -r -a RELEASE_LIST <<< "${RELEASE_NAMES}"
 
+# Kill any existing port-forward processes on exit
 cleanup() {
   if [[ -n "${PF_PID:-}" ]]; then
     kill "${PF_PID}" >/dev/null 2>&1 || true

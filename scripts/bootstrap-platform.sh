@@ -8,10 +8,12 @@ echo "INFO: Bootstrapping ArgoCD Platform..."
 helm repo add argo https://argoproj.github.io/argo-helm
 helm repo update
 
-echo "INFO: Creating namespace and installing ArgoCD..."
+echo "INFO: Creating namespaces..."
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace deployguard --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
-
+echo "INFO: Installing/Upgrading ArgoCD..."
 helm upgrade --install argocd argo/argo-cd \
     --namespace argocd \
     --set server.service.type=ClusterIP \

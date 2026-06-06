@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Usage: ./scripts/dev-deploy.sh
-# Optional: IMAGE_TAG=v2 ARGO_APP_NAMES=telemetry-collector,prometheus SKIP_VERIFY=true ./scripts/dev-deploy.sh
+# Optional: IMAGE_TAG=v2 IMAGE_CONTEXT=app ARGO_APP_NAMES=telemetry-collector,prometheus SKIP_VERIFY=true ./scripts/dev-deploy.sh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
 IMAGE_REPO="${IMAGE_REPO:-telemetry-collector}"
 IMAGE_TAG="${IMAGE_TAG:-v1}"
+IMAGE_CONTEXT="${IMAGE_CONTEXT:-app}"
 ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
 ARGO_APP_NAMES="${ARGO_APP_NAMES:-telemetry-collector,prometheus}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-180}"
@@ -19,8 +20,19 @@ for cmd in docker k3d kubectl; do
   fi
 done
 
+if [[ "${IMAGE_CONTEXT}" = /* ]]; then
+  BUILD_CONTEXT="${IMAGE_CONTEXT}"
+else
+  BUILD_CONTEXT="${REPO_ROOT}/${IMAGE_CONTEXT}"
+fi
+
+if [[ ! -d "${BUILD_CONTEXT}" ]]; then
+  echo "ERROR: Build context does not exist: ${BUILD_CONTEXT}"
+  exit 1
+fi
+
 echo "INFO: Building image ${IMAGE_REPO}:${IMAGE_TAG}"
-docker build -t "${IMAGE_REPO}:${IMAGE_TAG}" "${REPO_ROOT}/app"
+docker build -t "${IMAGE_REPO}:${IMAGE_TAG}" "${BUILD_CONTEXT}"
 
 echo "INFO: Importing image into k3d cluster ${CLUSTER_NAME}"
 k3d image import "${IMAGE_REPO}:${IMAGE_TAG}" -c "${CLUSTER_NAME}"

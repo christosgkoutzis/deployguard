@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Usage: ./scripts/verify.sh
-# Optional: RELEASE_NAMES=telemetry-collector EXPECTED_METRIC=telemetry_collector_requests_total PROM_EXPECTED_JOBS=telemetry-collector,prometheus ./scripts/verify.sh
+# Optional: RELEASE_NAMES=my-service EXPECTED_METRIC=http_requests_total PROM_EXPECTED_JOBS=my-service,prometheus HEALTH_PATH=/health METRICS_PATH=/metrics ./scripts/verify.sh
 
 NAMESPACE="${NAMESPACE:-deployguard}"
-RELEASE_NAMES="${RELEASE_NAMES:-telemetry-collector}"
+RELEASE_NAMES="${RELEASE_NAMES:-}"
 LOCAL_PORT="${LOCAL_PORT:-18080}"
 SERVICE_PORT="${SERVICE_PORT:-80}"
-EXPECTED_METRIC="${EXPECTED_METRIC:-telemetry_collector_requests_total}"
+HEALTH_PATH="${HEALTH_PATH:-/health}"
+METRICS_PATH="${METRICS_PATH:-/metrics}"
+EXPECTED_METRIC="${EXPECTED_METRIC:-}"
 VERIFY_MONITORING="${VERIFY_MONITORING:-true}"
 PROM_NAMESPACE="${PROM_NAMESPACE:-monitoring}"
 PROM_RELEASE_NAME="${PROM_RELEASE_NAME:-prometheus}"
-PROM_EXPECTED_JOBS="${PROM_EXPECTED_JOBS:-telemetry-collector,prometheus}"
+PROM_EXPECTED_JOBS="${PROM_EXPECTED_JOBS:-}"
 PROM_SERVICE_NAME="${PROM_SERVICE_NAME:-${PROM_RELEASE_NAME}-server}"
 PROM_LOCAL_PORT="${PROM_LOCAL_PORT:-19090}"
 PROM_SERVICE_PORT="${PROM_SERVICE_PORT:-80}"
@@ -25,7 +27,17 @@ for cmd in kubectl curl; do
 done
 
 if [[ -z "${RELEASE_NAMES// }" ]]; then
-  echo "ERROR: RELEASE_NAMES must be a non-empty comma-separated list"
+  mapfile -t DETECTED_RELEASES < <(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -v '^prometheus$' || true)
+  if [[ ${#DETECTED_RELEASES[@]} -eq 0 ]]; then
+    echo "ERROR: RELEASE_NAMES not provided and no ArgoCD service applications were detected"
+    exit 1
+  fi
+  RELEASE_NAMES="$(IFS=','; echo "${DETECTED_RELEASES[*]}")"
+  echo "INFO: Auto-detected RELEASE_NAMES=${RELEASE_NAMES}"
+fi
+
+if [[ "${HEALTH_PATH}" != /* ]] || [[ "${METRICS_PATH}" != /* ]]; then
+  echo "ERROR: HEALTH_PATH and METRICS_PATH must start with '/'"
   exit 1
 fi
 
@@ -63,11 +75,16 @@ for release in "${RELEASE_LIST[@]}"; do
 
   sleep 2
 
-  echo "INFO: Checking /health for ${release_name}"
-  curl -fsS "http://127.0.0.1:${LOCAL_PORT}/health" >/dev/null
+  echo "INFO: Checking ${HEALTH_PATH} for ${release_name}"
+  curl -fsS "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}" >/dev/null
 
-  echo "INFO: Checking /metrics for ${release_name}"
-  curl -fsS "http://127.0.0.1:${LOCAL_PORT}/metrics" | grep -q "${EXPECTED_METRIC}"
+  echo "INFO: Checking ${METRICS_PATH} for ${release_name}"
+  METRICS_BODY=$(curl -fsS "http://127.0.0.1:${LOCAL_PORT}${METRICS_PATH}")
+  if [[ -n "${EXPECTED_METRIC}" ]]; then
+    echo "${METRICS_BODY}" | grep -q "${EXPECTED_METRIC}"
+  else
+    echo "${METRICS_BODY}" | grep -Eq '# HELP|# TYPE'
+  fi
 
   kill "${PF_PID}" >/dev/null 2>&1 || true
   wait "${PF_PID}" 2>/dev/null || true
@@ -76,8 +93,7 @@ done
 
 if [[ "${VERIFY_MONITORING}" == "true" ]]; then
   if [[ -z "${PROM_EXPECTED_JOBS// }" ]]; then
-    echo "ERROR: PROM_EXPECTED_JOBS must be a non-empty comma-separated list"
-    exit 1
+    PROM_EXPECTED_JOBS="${RELEASE_NAMES},prometheus"
   fi
 
   IFS=',' read -r -a PROM_JOB_LIST <<< "${PROM_EXPECTED_JOBS}"
@@ -102,9 +118,13 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
     done
     echo "${TARGETS_JSON}" | grep -q '"health":"up"'
 
-    echo "INFO: Checking Prometheus query"
-    QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/query")
-    echo "${QUERY_JSON}" | grep -q '"status":"success"'
+    if [[ -n "${EXPECTED_METRIC}" ]]; then
+      echo "INFO: Checking Prometheus query"
+      QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/query")
+      echo "${QUERY_JSON}" | grep -q '"status":"success"'
+    else
+      echo "INFO: EXPECTED_METRIC not set, skipping Prometheus query check"
+    fi
   else
     echo "INFO: Prometheus service not found, skipping monitoring checks"
   fi

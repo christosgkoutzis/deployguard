@@ -82,5 +82,28 @@ if [[ "${SKIP_VERIFY}" == "true" ]]; then
   echo "INFO: SKIP_VERIFY=true, skipping verification"
 else
   echo "INFO: Running verification"
+  VERIFY_RELEASE_NAMES="${VERIFY_RELEASE_NAMES:-}"
+  if [[ -z "${VERIFY_RELEASE_NAMES// }" ]]; then
+    release_list=()
+    for app in "${ARGO_APPS[@]}"; do
+      app_name="${app// /}"
+      if [[ "${app_name}" != "prometheus" ]]; then
+        release_list+=("${app_name}")
+      fi
+    done
+    if [[ ${#release_list[@]} -eq 0 ]]; then
+      echo "ERROR: No service releases found for verification"
+      exit 1
+    fi
+    VERIFY_RELEASE_NAMES="$(IFS=','; echo "${release_list[*]}")"
+  fi
+
+  VERIFY_PROM_EXPECTED_JOBS="${VERIFY_PROM_EXPECTED_JOBS:-${ARGO_APP_NAMES}}"
+
+  RELEASE_NAMES="${VERIFY_RELEASE_NAMES}" \
+  PROM_EXPECTED_JOBS="${VERIFY_PROM_EXPECTED_JOBS}" \
+  EXPECTED_METRIC="${EXPECTED_METRIC:-}" \
+  HEALTH_PATH="${HEALTH_PATH:-/health}" \
+  METRICS_PATH="${METRICS_PATH:-/metrics}" \
   "${REPO_ROOT}/scripts/verify.sh"
 fi

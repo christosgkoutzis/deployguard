@@ -1,18 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: ./scripts/add-service.sh <service-name>
+# Usage:
+# ./scripts/add-service.sh <service-name> \
+#   [--image-repo <repo>] \
+#   [--image-tag <tag>] \
+#   [--container-port <port>] \
+#   [--service-port <port>] \
+#   [--health-path <path>] \
+#   [--metrics-path <path>]
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="${1:-}"
+shift || true
 
 DEFAULT_NAMESPACE="deployguard"
 DEFAULT_REPO_URL="https://github.com/christosgkoutzis/deployguard.git"
 DEFAULT_TARGET_REVISION="master"
 
+IMAGE_REPO="${SERVICE_NAME}"
+IMAGE_TAG="v1"
+CONTAINER_PORT="8000"
+SERVICE_PORT="80"
+HEALTH_PATH="/health"
+METRICS_PATH="/metrics"
+NAMESPACE="${DEFAULT_NAMESPACE}"
+REPO_URL="${DEFAULT_REPO_URL}"
+TARGET_REVISION="${DEFAULT_TARGET_REVISION}"
+
 if [[ -z "${SERVICE_NAME}" ]]; then
   echo "ERROR: Missing service name"
-  echo "Usage: ./scripts/add-service.sh <service-name>"
+  echo "Usage: ./scripts/add-service.sh <service-name> [--image-repo <repo>] [--image-tag <tag>] [--container-port <port>] [--service-port <port>] [--health-path <path>] [--metrics-path <path>]"
   exit 1
 fi
 
@@ -22,6 +40,67 @@ if [[ ! "${SERVICE_NAME}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
 fi
 
 APP_DIR="${REPO_ROOT}/app/${SERVICE_NAME}"
+
+if [[ -f "${APP_DIR}/service.contract.env" ]]; then
+  # shellcheck disable=SC1090
+  source "${APP_DIR}/service.contract.env"
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --image-repo)
+      IMAGE_REPO="${2:-}"
+      shift 2
+      ;;
+    --image-tag)
+      IMAGE_TAG="${2:-}"
+      shift 2
+      ;;
+    --container-port)
+      CONTAINER_PORT="${2:-}"
+      shift 2
+      ;;
+    --service-port)
+      SERVICE_PORT="${2:-}"
+      shift 2
+      ;;
+    --health-path)
+      HEALTH_PATH="${2:-}"
+      shift 2
+      ;;
+    --metrics-path)
+      METRICS_PATH="${2:-}"
+      shift 2
+      ;;
+    --namespace)
+      NAMESPACE="${2:-}"
+      shift 2
+      ;;
+    --repo-url)
+      REPO_URL="${2:-}"
+      shift 2
+      ;;
+    --target-revision)
+      TARGET_REVISION="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "ERROR: Unknown argument '$1'"
+      exit 1
+      ;;
+  esac
+done
+
+if [[ ! "${CONTAINER_PORT}" =~ ^[0-9]+$ ]] || [[ ! "${SERVICE_PORT}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --container-port and --service-port must be numeric"
+  exit 1
+fi
+
+if [[ "${HEALTH_PATH}" != /* ]] || [[ "${METRICS_PATH}" != /* ]]; then
+  echo "ERROR: --health-path and --metrics-path must start with '/'"
+  exit 1
+fi
+
 CHART_DIR="${REPO_ROOT}/platform/charts/${SERVICE_NAME}"
 CHART_TEMPLATES_DIR="${CHART_DIR}/templates"
 GITOPS_FILE="${REPO_ROOT}/platform/gitops/${SERVICE_NAME}.yaml"
@@ -46,26 +125,6 @@ if [[ ! -f "${APP_DIR}/Dockerfile" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${APP_DIR}/requirements.txt" ]]; then
-  echo "ERROR: Missing required file: app/${SERVICE_NAME}/requirements.txt"
-  exit 1
-fi
-
-if [[ ! -f "${APP_DIR}/main.py" ]]; then
-  echo "ERROR: Missing required file: app/${SERVICE_NAME}/main.py"
-  exit 1
-fi
-
-if ! grep -R --exclude-dir='__pycache__' -E '(/health|health_check|healthcheck)' "${APP_DIR}" >/dev/null 2>&1; then
-  echo "ERROR: Service must expose a health endpoint under app/${SERVICE_NAME}"
-  exit 1
-fi
-
-if ! grep -R --exclude-dir='__pycache__' -E '(/metrics|prometheus|Counter|Histogram|Summary|Gauge)' "${APP_DIR}" >/dev/null 2>&1; then
-  echo "ERROR: Service must expose Prometheus metrics under app/${SERVICE_NAME}"
-  exit 1
-fi
-
 mkdir -p "${CHART_TEMPLATES_DIR}"
 
 cat > "${CHART_DIR}/Chart.yaml" <<EOF
@@ -80,8 +139,8 @@ EOF
 cat > "${CHART_DIR}/values.yaml" <<EOF
 replicaCount: 2
 image:
-  repository: ${SERVICE_NAME}
-  tag: v1
+  repository: ${IMAGE_REPO}
+  tag: ${IMAGE_TAG}
   pullPolicy: Never
 
 tenant:
@@ -89,8 +148,8 @@ tenant:
   label: "alpha"
 
 service:
-  port: 80
-  targetPort: 8000
+  port: ${SERVICE_PORT}
+  targetPort: ${CONTAINER_PORT}
 
 resources:
   requests:
@@ -101,21 +160,24 @@ resources:
     memory: "256Mi"
 
 readinessProbe:
-  path: /health
+  path: ${HEALTH_PATH}
   initialDelaySeconds: 5
   periodSeconds: 10
   timeoutSeconds: 2
   failureThreshold: 3
 
 livenessProbe:
-  path: /health
+  path: ${HEALTH_PATH}
   initialDelaySeconds: 15
   periodSeconds: 10
   timeoutSeconds: 2
   failureThreshold: 3
+
+metrics:
+  path: ${METRICS_PATH}
 EOF
 
-cat > "${CHART_TEMPLATES_DIR}/collector.yaml" <<'EOF'
+cat > "${CHART_TEMPLATES_DIR}/service.yaml" <<'EOF'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -172,7 +234,7 @@ metadata:
   name: {{ .Release.Name }}-service
   annotations:
     prometheus.io/scrape: "true"
-    prometheus.io/path: /metrics
+    prometheus.io/path: {{ .Values.metrics.path | quote }}
     prometheus.io/port: {{ .Values.service.port | quote }}
     prometheus.io/job: {{ .Release.Name | quote }}
 spec:
@@ -194,14 +256,14 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: ${DEFAULT_REPO_URL}
-    targetRevision: ${DEFAULT_TARGET_REVISION}
+    repoURL: ${REPO_URL}
+    targetRevision: ${TARGET_REVISION}
     path: platform/charts/${SERVICE_NAME}
     helm:
       releaseName: ${SERVICE_NAME}
   destination:
     server: https://kubernetes.default.svc
-    namespace: ${DEFAULT_NAMESPACE}
+    namespace: ${NAMESPACE}
   syncPolicy:
     syncOptions:
       - CreateNamespace=true

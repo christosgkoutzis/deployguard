@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Usage: ./scripts/dev-deploy.sh
-# Optional: IMAGE_TAG=v2 IMAGE_CONTEXT=app ARGO_APP_NAMES=telemetry-collector,prometheus SKIP_VERIFY=true ./scripts/dev-deploy.sh
+# Optional: IMAGE_TAG=v2 ARGO_APP_NAMES=ruby-gateway,python-backend,prometheus SKIP_VERIFY=true ./scripts/dev-deploy.sh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
-IMAGE_REPO="${IMAGE_REPO:-telemetry-collector}"
 IMAGE_TAG="${IMAGE_TAG:-v1}"
-IMAGE_CONTEXT="${IMAGE_CONTEXT:-app}"
 ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
-ARGO_APP_NAMES="${ARGO_APP_NAMES:-telemetry-collector,prometheus}"
+ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,prometheus}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-180}"
 SKIP_VERIFY="${SKIP_VERIFY:-false}"
+# Platform apps that have no app/ directory to build from
+PLATFORM_APPS="${PLATFORM_APPS:-prometheus}"
 
 for cmd in docker k3d kubectl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -20,29 +20,37 @@ for cmd in docker k3d kubectl; do
   fi
 done
 
-if [[ "${IMAGE_CONTEXT}" = /* ]]; then
-  BUILD_CONTEXT="${IMAGE_CONTEXT}"
-else
-  BUILD_CONTEXT="${REPO_ROOT}/${IMAGE_CONTEXT}"
-fi
-
-if [[ ! -d "${BUILD_CONTEXT}" ]]; then
-  echo "ERROR: Build context does not exist: ${BUILD_CONTEXT}"
-  exit 1
-fi
-
-echo "INFO: Building image ${IMAGE_REPO}:${IMAGE_TAG}"
-docker build -t "${IMAGE_REPO}:${IMAGE_TAG}" "${BUILD_CONTEXT}"
-
-echo "INFO: Importing image into k3d cluster ${CLUSTER_NAME}"
-k3d image import "${IMAGE_REPO}:${IMAGE_TAG}" -c "${CLUSTER_NAME}"
-
 if [[ -z "${ARGO_APP_NAMES// }" ]]; then
   echo "ERROR: ARGO_APP_NAMES must be a non-empty comma-separated list"
   exit 1
 fi
 
 IFS=',' read -r -a ARGO_APPS <<< "${ARGO_APP_NAMES}"
+IFS=',' read -r -a PLATFORM_APPS_LIST <<< "${PLATFORM_APPS}"
+
+# Build and import images for all service apps (excluding platform apps)
+for app in "${ARGO_APPS[@]}"; do
+  app_name="${app// /}"
+  is_platform=false
+  for platform_app in "${PLATFORM_APPS_LIST[@]}"; do
+    if [[ "${app_name}" == "${platform_app// /}" ]]; then
+      is_platform=true
+      break
+    fi
+  done
+  [[ "${is_platform}" == "true" ]] && continue
+
+  app_context="${REPO_ROOT}/app/${app_name}"
+  if [[ ! -d "${app_context}" ]]; then
+    echo "ERROR: App directory not found: app/${app_name}"
+    exit 1
+  fi
+
+  echo "INFO: Building image ${app_name}:${IMAGE_TAG}"
+  docker build -t "${app_name}:${IMAGE_TAG}" "${app_context}"
+  echo "INFO: Importing image ${app_name}:${IMAGE_TAG} into k3d cluster ${CLUSTER_NAME}"
+  k3d image import "${app_name}:${IMAGE_TAG}" -c "${CLUSTER_NAME}"
+done
 
 for app in "${ARGO_APPS[@]}"; do
   app_name="${app// /}"

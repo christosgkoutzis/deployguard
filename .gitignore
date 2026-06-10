@@ -1,0 +1,6 @@
+# Generated service deployment artifacts (created by scripts/add-service.sh)
+platform/charts/*
+platform/gitops/*.yaml
+
+# Keep the platform monitoring app manifest committed
+!platform/gitops/prometheus.yaml

@@ -1,4 +1,4 @@
-# Service Eligibility Contract (Phase 1)
+# Service Eligibility Contract
 
 This document defines exactly when `scripts/add-service.sh` is expected to generate a working Helm chart and ArgoCD Application.
 
@@ -18,7 +18,7 @@ If a service meets all requirements below and still fails in local cluster deplo
 1. Single container HTTP service.
 2. Service must expose a health endpoint path provided to scaffold input.
 3. Service must expose a Prometheus metrics endpoint path provided to scaffold input.
-4. Service must be stateless for this phase.
+4. Service must be stateless.
 
 ## Required Build/Deploy Assumptions
 
@@ -28,12 +28,12 @@ If a service meets all requirements below and still fails in local cluster deplo
    - defaults: image repo `<service-name>`, image tag `v1`, container port `8000`, service port `80`, health path `/health`, metrics path `/metrics`
    - overrides: CLI flags and optional `app/<service-name>/service.contract.env`
 
-## Supported Technology Scope (Phase 1)
+## Supported Technology Scope
 
 1. Stack-agnostic HTTP services packaged as Docker images.
 2. Any language/runtime is supported if the service contract is satisfied.
 
-## Explicitly Unsupported Cases (Phase 1)
+## Explicitly Unsupported Cases 
 
 1. Multi-container pods or sidecar-dependent workloads.
 2. Stateful services requiring persistent data guarantees.

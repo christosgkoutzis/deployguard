@@ -116,3 +116,9 @@ Because the generated Helm charts are `.gitignore`d, the ArgoCD application cann
 1. `dev-deploy.sh` packages the locally generated charts and serves them via a lightweight, ephemeral `nginx` container on port `8081`.
 2. The generated ArgoCD apps point to `http://host.k3d.internal:8081`, allowing the k3d cluster to fetch the local charts dynamically.
 3. Scripts are built to fail-fast and auto-cleanup if a scaffold step fails, ensuring no partial or corrupted states.
+
+## CI/CD Guardrails
+
+This repository includes a GitHub Actions workflow (`.github/workflows/cluster-integration.yml`). On every push to the master branch or pull request, it runs a full **End-to-End Cluster Validation**. 
+
+It dynamically spins up an ephemeral k3d cluster, bootstraps ArgoCD, scaffolds the sample services, and runs the entire `dev-deploy` and `verify` flow. This ensures no change breaks the local GitOps pipeline.

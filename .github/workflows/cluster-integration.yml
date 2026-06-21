@@ -1,0 +1,44 @@
+name: End-to-End Integration
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  cluster-validation:
+    name: Cluster Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Bash Syntax Check
+        run: |
+          echo "INFO: Checking bash syntax for all scripts..."
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: Install k3d
+        run: |
+          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+      - name: Bootstrap Cluster & ArgoCD
+        run: |
+          ./scripts/setup.sh || true
+          ./scripts/bootstrap-platform.sh
+
+      - name: Scaffold Services
+        run: |
+          export SERVICE_NAME="python-backend"
+          ./scripts/add-service.sh python-backend
+          export SERVICE_NAME="ruby-gateway"
+          ./scripts/add-service.sh ruby-gateway
+
+      - name: Build and Deploy (Local GitOps)
+        run: ./scripts/dev-deploy.sh
+
+      - name: Verify Ecosystem Health
+        run: ./scripts/verify.sh

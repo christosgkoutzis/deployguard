@@ -20,6 +20,16 @@ for cmd in docker k3d kubectl; do
   fi
 done
 
+if ! docker info >/dev/null 2>&1; then
+  echo "ERROR: Docker daemon is not running. Please start Docker before deploying."
+  exit 1
+fi
+
+if ! k3d cluster get "${CLUSTER_NAME}" >/dev/null 2>&1; then
+  echo "ERROR: k3d cluster '${CLUSTER_NAME}' not found. Did you run ./scripts/setup.sh?"
+  exit 1
+fi
+
 if [[ -z "${ARGO_APP_NAMES// }" ]]; then
   echo "ERROR: ARGO_APP_NAMES must be a non-empty comma-separated list"
   exit 1
@@ -90,16 +100,22 @@ for app in "${ARGO_APPS[@]}"; do
     -p '{"operation":{"sync":{"prune":true}}}' >/dev/null
 
   echo "INFO: Waiting for ArgoCD sync status for ${app_name}"
-  kubectl -n "${ARGO_APP_NAMESPACE}" wait \
+  if ! kubectl -n "${ARGO_APP_NAMESPACE}" wait \
     --for=jsonpath='{.status.sync.status}'=Synced \
     "application/${app_name}" \
-    --timeout="${ARGO_SYNC_TIMEOUT_SECONDS}s"
+    --timeout="${ARGO_SYNC_TIMEOUT_SECONDS}s"; then
+    echo "ERROR: ArgoCD sync timed out for ${app_name}. Run 'kubectl -n ${ARGO_APP_NAMESPACE} get application ${app_name} -o yaml' to debug."
+    exit 1
+  fi
 
   echo "INFO: Waiting for ArgoCD health status for ${app_name}"
-  kubectl -n "${ARGO_APP_NAMESPACE}" wait \
+  if ! kubectl -n "${ARGO_APP_NAMESPACE}" wait \
     --for=jsonpath='{.status.health.status}'=Healthy \
     "application/${app_name}" \
-    --timeout="${ARGO_SYNC_TIMEOUT_SECONDS}s"
+    --timeout="${ARGO_SYNC_TIMEOUT_SECONDS}s"; then
+    echo "ERROR: ArgoCD health check timed out for ${app_name}. Check the pods: 'kubectl -n deployguard get pods -l app=${app_name}'"
+    exit 1
+  fi
 done
 
 echo "INFO: ArgoCD sync completed"

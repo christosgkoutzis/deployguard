@@ -127,6 +127,9 @@ fi
 
 mkdir -p "${CHART_TEMPLATES_DIR}"
 
+# Cleanup on failure (Safety Hardening)
+trap 'if [[ $? -ne 0 ]]; then echo "ERROR: Scaffold failed, cleaning up..."; rm -rf "${CHART_DIR}" "${GITOPS_FILE}"; fi' EXIT
+
 cat > "${CHART_DIR}/Chart.yaml" <<EOF
 apiVersion: v2
 name: ${SERVICE_NAME}
@@ -256,9 +259,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: ${REPO_URL}
-    targetRevision: ${TARGET_REVISION}
-    path: platform/charts/${SERVICE_NAME}
+    repoURL: http://host.k3d.internal:8081
+    chart: ${SERVICE_NAME}
+    targetRevision: 0.1.0
     helm:
       releaseName: ${SERVICE_NAME}
   destination:

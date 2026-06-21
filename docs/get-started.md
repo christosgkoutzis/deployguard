@@ -106,3 +106,11 @@ kubectl -n monitoring port-forward svc/prometheus-server 9090:80
 ## Notes on Generated Files
 
 Generated charts and generated ArgoCD app YAMLs are intentionally ignored by git. This keeps the repository template-first and avoids committing scaffold outputs.
+
+## Behind the Scenes: Local GitOps Server
+
+Because the generated Helm charts are `.gitignore`d, the ArgoCD application cannot pull them from the remote GitHub repository. To maintain the template-first approach without breaking GitOps:
+
+1. `dev-deploy.sh` packages the locally generated charts and serves them via a lightweight, ephemeral `nginx` container on port `8081`.
+2. The generated ArgoCD apps point to `http://host.k3d.internal:8081`, allowing the k3d cluster to fetch the local charts dynamically.
+3. Scripts are built to fail-fast and auto-cleanup if a scaffold step fails, ensuring no partial or corrupted states.

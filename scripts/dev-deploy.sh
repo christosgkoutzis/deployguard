@@ -46,11 +46,29 @@ for app in "${ARGO_APPS[@]}"; do
     exit 1
   fi
 
+  if [[ ! -d "${REPO_ROOT}/platform/charts/${app_name}" ]]; then
+    echo "ERROR: Missing generated chart for ${app_name}. Did you run add-service.sh?"
+    exit 1
+  fi
+
   echo "INFO: Building image ${app_name}:${IMAGE_TAG}"
   docker build -t "${app_name}:${IMAGE_TAG}" "${app_context}"
   echo "INFO: Importing image ${app_name}:${IMAGE_TAG} into k3d cluster ${CLUSTER_NAME}"
   k3d image import "${app_name}:${IMAGE_TAG}" -c "${CLUSTER_NAME}"
 done
+
+echo "INFO: Packaging Helm charts for local distribution..."
+for app in "${ARGO_APPS[@]}"; do
+  app_name="${app// /}"
+  if [[ -d "${REPO_ROOT}/platform/charts/${app_name}" ]]; then
+    helm package "${REPO_ROOT}/platform/charts/${app_name}" -d "${REPO_ROOT}/platform/charts" >/dev/null
+  fi
+done
+helm repo index "${REPO_ROOT}/platform/charts"
+
+echo "INFO: Starting local Helm repository server..."
+docker stop deployguard-helm-server >/dev/null 2>&1 || true
+docker run -d --rm --name deployguard-helm-server -p 8081:80 -v "${REPO_ROOT}/platform/charts:/usr/share/nginx/html" nginx:alpine >/dev/null
 
 for app in "${ARGO_APPS[@]}"; do
   app_name="${app// /}"

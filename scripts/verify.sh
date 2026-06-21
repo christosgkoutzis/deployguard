@@ -73,7 +73,13 @@ for release in "${RELEASE_LIST[@]}"; do
   kubectl -n "${NAMESPACE}" port-forward svc/"${service_name}" "${LOCAL_PORT}:${SERVICE_PORT}" >"${port_forward_log}" 2>&1 &
   PF_PID=$!
 
-  sleep 2
+# Wait for port-forward to actually start accepting connections (timeout 10s)
+  wait_time=0
+  while ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}" >/dev/null 2>&1; do
+    sleep 1
+    wait_time=$((wait_time + 1))
+    if [[ ${wait_time} -ge 10 ]]; then echo "ERROR: Port-forward timeout for ${release_name}"; exit 1; fi
+  done
 
   echo "INFO: Checking ${HEALTH_PATH} for ${release_name}"
   curl -fsS "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}" >/dev/null

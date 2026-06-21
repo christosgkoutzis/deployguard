@@ -63,6 +63,8 @@ Builds service images from `app/<service-name>`, imports them into k3d, syncs Ar
 
 Checks rollout, health endpoint, metrics endpoint, and Prometheus scraping.
 
+*Note: The verification checks are strict. If any endpoint is unreachable or a metric format is missing, the script will halt immediately and explicitly print the failing service and endpoint.*
+
 ## 7) Validate Service-to-Service Communication
 
 Port-forward Ruby gateway and open/curl it:

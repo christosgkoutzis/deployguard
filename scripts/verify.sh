@@ -27,7 +27,7 @@ for cmd in kubectl curl; do
 done
 
 if [[ -z "${RELEASE_NAMES// }" ]]; then
-  mapfile -t DETECTED_RELEASES < <(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -v '^prometheus$' || true)
+  mapfile -t DETECTED_RELEASES < <(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | sort | grep -v '^prometheus$' || true)
   if [[ ${#DETECTED_RELEASES[@]} -eq 0 ]]; then
     echo "ERROR: RELEASE_NAMES not provided and no ArgoCD service applications were detected"
     exit 1
@@ -82,14 +82,26 @@ for release in "${RELEASE_LIST[@]}"; do
   done
 
   echo "INFO: Checking ${HEALTH_PATH} for ${release_name}"
-  curl -fsS "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}" >/dev/null
+  if ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}" >/dev/null; then
+    echo "ERROR: Health endpoint ${HEALTH_PATH} failed for ${release_name}"
+    exit 1
+  fi
 
   echo "INFO: Checking ${METRICS_PATH} for ${release_name}"
-  METRICS_BODY=$(curl -fsS "http://127.0.0.1:${LOCAL_PORT}${METRICS_PATH}")
+  if ! METRICS_BODY=$(curl -fsS "http://127.0.0.1:${LOCAL_PORT}${METRICS_PATH}"); then
+    echo "ERROR: Metrics endpoint ${METRICS_PATH} unreachable for ${release_name}"
+    exit 1
+  fi
   if [[ -n "${EXPECTED_METRIC}" ]]; then
-    echo "${METRICS_BODY}" | grep -q "${EXPECTED_METRIC}"
+    if ! echo "${METRICS_BODY}" | grep -q "${EXPECTED_METRIC}"; then
+      echo "ERROR: Expected metric '${EXPECTED_METRIC}' not found for ${release_name}"
+      exit 1
+    fi
   else
-    echo "${METRICS_BODY}" | grep -Eq '# HELP|# TYPE'
+    if ! echo "${METRICS_BODY}" | grep -Eq '# HELP|# TYPE'; then
+      echo "ERROR: No Prometheus metrics format detected for ${release_name}"
+      exit 1
+    fi
   fi
 
   kill "${PF_PID}" >/dev/null 2>&1 || true
@@ -120,14 +132,23 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
         exit 1
       fi
 
-      echo "${TARGETS_JSON}" | grep -q "\"job\":\"${job_name}\""
+      if ! echo "${TARGETS_JSON}" | grep -q "\"job\":\"${job_name}\""; then
+        echo "ERROR: Prometheus target job '${job_name}' not found"
+        exit 1
+      fi
     done
-    echo "${TARGETS_JSON}" | grep -q '"health":"up"'
+    if ! echo "${TARGETS_JSON}" | grep -q '"health":"up"'; then
+      echo "ERROR: One or more Prometheus targets are not healthy ('up')"
+      exit 1
+    fi
 
     if [[ -n "${EXPECTED_METRIC}" ]]; then
       echo "INFO: Checking Prometheus query"
       QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/query")
-      echo "${QUERY_JSON}" | grep -q '"status":"success"'
+      if ! echo "${QUERY_JSON}" | grep -q '"status":"success"'; then
+        echo "ERROR: Prometheus query for '${EXPECTED_METRIC}' failed"
+        exit 1
+      fi
     else
       echo "INFO: EXPECTED_METRIC not set, skipping Prometheus query check"
     fi

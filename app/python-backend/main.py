@@ -1,8 +1,8 @@
 import os
 import time
 import datetime
-from fastapi import FastAPI, Request
-from prometheus_client import Counter, Histogram, make_asgi_app
+from fastapi import FastAPI, Request, Response
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 APP_NAME = os.getenv("APP_NAME", "python-backend")
 
@@ -41,4 +41,6 @@ def get_message():
     return {"message": f"Hello from {APP_NAME}!"}
 
 
-app.mount("/metrics", make_asgi_app())
+@app.get("/metrics")
+def get_metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

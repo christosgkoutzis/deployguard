@@ -38,6 +38,9 @@ fi
 IFS=',' read -r -a ARGO_APPS <<< "${ARGO_APP_NAMES}"
 IFS=',' read -r -a PLATFORM_APPS_LIST <<< "${PLATFORM_APPS}"
 
+# Initialize array to collect images for batch import
+declare -a IMAGES_TO_IMPORT=()
+
 # Build and import images for all service apps (excluding platform apps)
 for app in "${ARGO_APPS[@]}"; do
   app_name="${app// /}"
@@ -63,9 +66,13 @@ for app in "${ARGO_APPS[@]}"; do
 
   echo "INFO: Building image ${app_name}:${IMAGE_TAG}"
   docker build -t "${app_name}:${IMAGE_TAG}" "${app_context}"
-  echo "INFO: Importing image ${app_name}:${IMAGE_TAG} into k3d cluster ${CLUSTER_NAME}"
-  k3d image import "${app_name}:${IMAGE_TAG}" -c "${CLUSTER_NAME}"
+  IMAGES_TO_IMPORT+=("${app_name}:${IMAGE_TAG}")
 done
+
+if [[ ${#IMAGES_TO_IMPORT[@]} -gt 0 ]]; then
+  echo "INFO: Importing images into k3d cluster ${CLUSTER_NAME} in batch..."
+  k3d image import "${IMAGES_TO_IMPORT[@]}" -c "${CLUSTER_NAME}"
+fi
 
 echo "INFO: Packaging Helm charts for local distribution..."
 for app in "${ARGO_APPS[@]}"; do
@@ -79,6 +86,15 @@ helm repo index "${REPO_ROOT}/platform/charts"
 echo "INFO: Starting local Helm repository server..."
 docker stop deployguard-helm-server >/dev/null 2>&1 || true
 docker run -d --rm --name deployguard-helm-server -p 8081:80 -v "${REPO_ROOT}/platform/charts:/usr/share/nginx/html" nginx:alpine >/dev/null
+
+echo "INFO: Registering ArgoCD applications..."
+for app in "${ARGO_APPS[@]}"; do
+  app_name="${app// /}"
+  manifest="${REPO_ROOT}/platform/gitops/${app_name}.yaml"
+  if [[ -f "${manifest}" ]]; then
+    kubectl apply -f "${manifest}" >/dev/null
+  fi
+done
 
 for app in "${ARGO_APPS[@]}"; do
   app_name="${app// /}"

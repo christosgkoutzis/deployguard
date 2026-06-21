@@ -40,22 +40,14 @@ This creates:
 - `platform/gitops/python-backend.yaml`
 - `platform/gitops/ruby-gateway.yaml`
 
-## 4) Register Generated ArgoCD Applications
-
-```bash
-kubectl apply -f platform/gitops/python-backend.yaml
-kubectl apply -f platform/gitops/ruby-gateway.yaml
-```
-
-## 5) Build, Import, Sync, and Wait
+## 4) Build, Import, Sync, and Wait
 
 ```bash
 ./scripts/dev-deploy.sh
 ```
+Builds service images, imports them into k3d, automatically registers the ArgoCD apps, triggers the sync, and waits for health.
 
-Builds service images from `app/<service-name>`, imports them into k3d, syncs ArgoCD apps, and waits for health.
-
-## 6) Run Verification
+## 5) Run Verification
 
 ```bash
 ./scripts/verify.sh
@@ -65,7 +57,7 @@ Checks rollout, health endpoint, metrics endpoint, and Prometheus scraping.
 
 *Note: The verification checks are strict. If any endpoint is unreachable or a metric format is missing, the script will halt immediately and explicitly print the failing service and endpoint.*
 
-## 7) Validate Service-to-Service Communication
+## 6) Validate Service-to-Service Communication
 
 Port-forward Ruby gateway and open/curl it:
 
@@ -83,7 +75,7 @@ kubectl -n deployguard port-forward svc/python-backend-service 8081:80
 curl http://127.0.0.1:8081/message
 ```
 
-## 8) Check ArgoCD and Prometheus
+## 7) Check ArgoCD and Prometheus
 
 ArgoCD:
 

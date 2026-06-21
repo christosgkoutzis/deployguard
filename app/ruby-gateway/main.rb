@@ -1,6 +1,6 @@
 require 'sinatra'
 require 'prometheus/client'
-require 'prometheus/client/rack/exporter'
+require 'prometheus/middleware/exporter'
 require 'net/http'
 require 'json'
 
@@ -14,7 +14,7 @@ HTTP_REQUESTS = REGISTRY.counter(
 # Kubernetes Service DNS name for the python-backend service
 BACKEND_URL = ENV.fetch('BACKEND_URL', 'http://python-backend-service:80')
 
-use Prometheus::Client::Rack::Exporter
+use Prometheus::Middleware::Exporter
 
 set :port, 8000
 set :bind, '0.0.0.0'

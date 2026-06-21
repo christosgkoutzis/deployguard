@@ -1,3 +1,4 @@
 source 'https://rubygems.org'
 gem 'sinatra', '~> 3.0'
 gem 'prometheus-client', '~> 4.0'
+gem 'webrick'

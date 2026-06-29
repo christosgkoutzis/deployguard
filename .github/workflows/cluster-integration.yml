@@ -27,18 +27,23 @@ jobs:
 
       - name: Bootstrap Cluster & ArgoCD
         run: |
-          ./scripts/setup.sh || true
+          ./scripts/setup.sh
           ./scripts/bootstrap-platform.sh
 
       - name: Scaffold Services
         run: |
-          export SERVICE_NAME="python-backend"
-          ./scripts/add-service.sh python-backend
-          export SERVICE_NAME="ruby-gateway"
-          ./scripts/add-service.sh ruby-gateway
+          for dir in app/*/; do
+            ./scripts/add-service.sh "$(basename "${dir}")"
+          done
 
       - name: Build and Deploy (Local GitOps)
-        run: ./scripts/dev-deploy.sh
+        run: |
+          services=()
+          for dir in app/*/; do
+            services+=("$(basename "${dir}")")
+          done
+          app_names="$(IFS=','; echo "${services[*]}")"
+          ARGO_APP_NAMES="${app_names},prometheus" ./scripts/dev-deploy.sh
 
       - name: Verify Ecosystem Health
         run: ./scripts/verify.sh

@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 echo "INFO: Starting control plane setup..."
 
@@ -51,7 +51,7 @@ if k3d cluster list | grep -q "$CLUSTER_NAME"; then
     echo "INFO: Cluster '$CLUSTER_NAME' already exists."
 else
     echo "INFO: Creating K3d Cluster: $CLUSTER_NAME..."
-    k3d cluster create $CLUSTER_NAME \
+    k3d cluster create "${CLUSTER_NAME}" \
       --servers 1 \
       --agents 2 \
       -p "8080:80@loadbalancer" \

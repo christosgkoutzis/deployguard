@@ -19,7 +19,7 @@ PROM_LOCAL_PORT="${PROM_LOCAL_PORT:-19090}"
 PROM_SERVICE_PORT="${PROM_SERVICE_PORT:-80}"
 PROM_PORT_FORWARD_LOG="${PROM_PORT_FORWARD_LOG:-/tmp/${PROM_RELEASE_NAME}-port-forward.log}"
 
-for cmd in kubectl curl; do
+for cmd in kubectl curl python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: Missing command '$cmd'"
     exit 1
@@ -124,7 +124,11 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
     sleep 2
 
     echo "INFO: Checking Prometheus targets"
-    TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets")
+    if ! TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets"); then
+      echo "ERROR: Prometheus targets check failed. Port-forward logs:"
+      cat "${PROM_PORT_FORWARD_LOG}"
+      exit 1
+    fi
     for job in "${PROM_JOB_LIST[@]}"; do
       job_name="${job// /}"
       if [[ -z "${job_name}" ]]; then
@@ -132,19 +136,28 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
         exit 1
       fi
 
-      if ! echo "${TARGETS_JSON}" | grep -q "\"job\":\"${job_name}\""; then
-        echo "ERROR: Prometheus target job '${job_name}' not found"
+      if ! python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+targets = data.get('data', {}).get('activeTargets', [])
+all_jobs = {t['labels'].get('job') for t in targets}
+up_jobs  = {t['labels'].get('job') for t in targets if t.get('health') == 'up'}
+job = '${job_name}'
+assert job in all_jobs, f\"Prometheus job '{job}' not found in targets\"
+assert job in up_jobs,  f\"Prometheus job '{job}' has no healthy ('up') target\"
+" <<< "${TARGETS_JSON}"; then
+        echo "ERROR: Prometheus job '${job_name}' not found or not healthy"
         exit 1
       fi
     done
-    if ! echo "${TARGETS_JSON}" | grep -q '"health":"up"'; then
-      echo "ERROR: One or more Prometheus targets are not healthy ('up')"
-      exit 1
-    fi
 
     if [[ -n "${EXPECTED_METRIC}" ]]; then
       echo "INFO: Checking Prometheus query"
-      QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/query")
+      if ! QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/query"); then
+        echo "ERROR: Prometheus query check failed. Port-forward logs:"
+        cat "${PROM_PORT_FORWARD_LOG}"
+        exit 1
+      fi
       if ! echo "${QUERY_JSON}" | grep -q '"status":"success"'; then
         echo "ERROR: Prometheus query for '${EXPECTED_METRIC}' failed"
         exit 1

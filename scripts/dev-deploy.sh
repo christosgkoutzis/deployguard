@@ -145,7 +145,14 @@ else
     release_list=()
     for app in "${ARGO_APPS[@]}"; do
       app_name="${app// /}"
-      if [[ "${app_name}" != "prometheus" ]]; then
+      is_platform=false
+      for platform_app in "${PLATFORM_APPS_LIST[@]}"; do
+        if [[ "${app_name}" == "${platform_app// /}" ]]; then
+          is_platform=true
+          break
+        fi
+      done
+      if [[ "${is_platform}" == "false" ]]; then
         release_list+=("${app_name}")
       fi
     done

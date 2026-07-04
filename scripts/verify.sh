@@ -121,7 +121,7 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
     kubectl -n "${PROM_NAMESPACE}" port-forward svc/"${PROM_SERVICE_NAME}" "${PROM_LOCAL_PORT}:${PROM_SERVICE_PORT}" >"${PROM_PORT_FORWARD_LOG}" 2>&1 &
     PROM_PF_PID=$!
 
-    sleep 2
+    sleep 10
 
     echo "INFO: Checking Prometheus targets"
     if ! TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets"); then

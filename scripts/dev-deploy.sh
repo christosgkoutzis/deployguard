@@ -8,7 +8,7 @@ CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
 IMAGE_TAG="${IMAGE_TAG:-v1}"
 ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
 ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,prometheus}"
-ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-180}"
+ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-300}"
 SKIP_VERIFY="${SKIP_VERIFY:-false}"
 # Platform apps that have no app/ directory to build from
 PLATFORM_APPS="${PLATFORM_APPS:-prometheus}"

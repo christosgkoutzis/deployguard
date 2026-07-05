@@ -38,20 +38,27 @@ fi
 IFS=',' read -r -a ARGO_APPS <<< "${ARGO_APP_NAMES}"
 IFS=',' read -r -a PLATFORM_APPS_LIST <<< "${PLATFORM_APPS}"
 
+# Sanitize apps and helper function for platform check
+declare -a SANITIZED_APPS=()
+for app in "${ARGO_APPS[@]}"; do
+  app_name="${app// /}"
+  [[ -n "${app_name}" ]] && SANITIZED_APPS+=("${app_name}")
+done
+
+is_platform_app() {
+  local target="$1"
+  for p_app in "${PLATFORM_APPS_LIST[@]}"; do
+    [[ "${target}" == "${p_app// /}" ]] && return 0
+  done
+  return 1
+}
+
 # Initialize array to collect images for batch import
 declare -a IMAGES_TO_IMPORT=()
 
 # Build and import images for all service apps (excluding platform apps)
-for app in "${ARGO_APPS[@]}"; do
-  app_name="${app// /}"
-  is_platform=false
-  for platform_app in "${PLATFORM_APPS_LIST[@]}"; do
-    if [[ "${app_name}" == "${platform_app// /}" ]]; then
-      is_platform=true
-      break
-    fi
-  done
-  [[ "${is_platform}" == "true" ]] && continue
+for app_name in "${SANITIZED_APPS[@]}"; do
+  is_platform_app "${app_name}" && continue
 
   app_context="${REPO_ROOT}/app/${app_name}"
   if [[ ! -d "${app_context}" ]]; then
@@ -75,8 +82,7 @@ if [[ ${#IMAGES_TO_IMPORT[@]} -gt 0 ]]; then
 fi
 
 echo "INFO: Packaging Helm charts for local distribution..."
-for app in "${ARGO_APPS[@]}"; do
-  app_name="${app// /}"
+for app_name in "${SANITIZED_APPS[@]}"; do
   if [[ -d "${REPO_ROOT}/platform/charts/${app_name}" ]]; then
     helm package "${REPO_ROOT}/platform/charts/${app_name}" -d "${REPO_ROOT}/platform/charts" >/dev/null
   fi
@@ -97,22 +103,14 @@ done
 
 
 echo "INFO: Registering ArgoCD applications..."
-for app in "${ARGO_APPS[@]}"; do
-  app_name="${app// /}"
+for app_name in "${SANITIZED_APPS[@]}"; do
   manifest="${REPO_ROOT}/platform/gitops/${app_name}.yaml"
   if [[ -f "${manifest}" ]]; then
     kubectl apply -f "${manifest}" >/dev/null
   fi
 done
 
-for app in "${ARGO_APPS[@]}"; do
-  app_name="${app// /}"
-
-  if [[ -z "${app_name}" ]]; then
-    echo "ERROR: ARGO_APP_NAMES contains an empty entry"
-    exit 1
-  fi
-
+for app_name in "${SANITIZED_APPS[@]}"; do
   if ! kubectl -n "${ARGO_APP_NAMESPACE}" get application "${app_name}" >/dev/null 2>&1; then
     echo "ERROR: ArgoCD Application '${app_name}' not found in namespace '${ARGO_APP_NAMESPACE}'"
     echo "ERROR: Run ./scripts/bootstrap-platform.sh first"
@@ -152,18 +150,8 @@ else
   VERIFY_RELEASE_NAMES="${VERIFY_RELEASE_NAMES:-}"
   if [[ -z "${VERIFY_RELEASE_NAMES// }" ]]; then
     release_list=()
-    for app in "${ARGO_APPS[@]}"; do
-      app_name="${app// /}"
-      is_platform=false
-      for platform_app in "${PLATFORM_APPS_LIST[@]}"; do
-        if [[ "${app_name}" == "${platform_app// /}" ]]; then
-          is_platform=true
-          break
-        fi
-      done
-      if [[ "${is_platform}" == "false" ]]; then
-        release_list+=("${app_name}")
-      fi
+    for app_name in "${SANITIZED_APPS[@]}"; do
+      is_platform_app "${app_name}" || release_list+=("${app_name}")
     done
     if [[ ${#release_list[@]} -eq 0 ]]; then
       echo "ERROR: No service releases found for verification"

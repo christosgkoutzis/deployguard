@@ -11,6 +11,7 @@ HEALTH_PATH="${HEALTH_PATH:-/health}"
 METRICS_PATH="${METRICS_PATH:-/metrics}"
 EXPECTED_METRIC="${EXPECTED_METRIC:-}"
 VERIFY_MONITORING="${VERIFY_MONITORING:-true}"
+PLATFORM_APPS="${PLATFORM_APPS:-prometheus}"
 PROM_NAMESPACE="${PROM_NAMESPACE:-monitoring}"
 PROM_RELEASE_NAME="${PROM_RELEASE_NAME:-prometheus}"
 PROM_EXPECTED_JOBS="${PROM_EXPECTED_JOBS:-}"
@@ -27,12 +28,23 @@ for cmd in kubectl curl python3; do
 done
 
 if [[ -z "${RELEASE_NAMES// }" ]]; then
-  mapfile -t DETECTED_RELEASES < <(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | sort | grep -v '^prometheus$' || true)
-  if [[ ${#DETECTED_RELEASES[@]} -eq 0 ]]; then
+  IFS=',' read -r -a PLATFORM_APPS_LIST <<< "${PLATFORM_APPS}"
+  mapfile -t ALL_DETECTED < <(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | sort || true)
+ 
+  declare -a FILTERED_RELEASES=()
+  for app in "${ALL_DETECTED[@]}"; do
+    is_platform=false
+    for p in "${PLATFORM_APPS_LIST[@]}"; do
+      [[ "${app}" == "${p// /}" ]] && is_platform=true && break
+    done
+    [[ "${is_platform}" == "false" ]] && FILTERED_RELEASES+=("${app}")
+  done
+
+  if [[ ${#FILTERED_RELEASES[@]} -eq 0 ]]; then
     echo "ERROR: RELEASE_NAMES not provided and no ArgoCD service applications were detected"
     exit 1
   fi
-  RELEASE_NAMES="$(IFS=','; echo "${DETECTED_RELEASES[*]}")"
+  RELEASE_NAMES="$(IFS=','; echo "${FILTERED_RELEASES[*]}")"
   echo "INFO: Auto-detected RELEASE_NAMES=${RELEASE_NAMES}"
 fi
 

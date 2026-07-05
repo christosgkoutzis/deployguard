@@ -15,7 +15,6 @@ SERVICE_NAME="${1:-}"
 shift || true
 
 DEFAULT_NAMESPACE="deployguard"
-DEFAULT_REPO_URL="https://github.com/christosgkoutzis/deployguard.git"
 DEFAULT_TARGET_REVISION="master"
 
 IMAGE_REPO="${SERVICE_NAME}"
@@ -25,7 +24,6 @@ SERVICE_PORT="80"
 HEALTH_PATH="/health"
 METRICS_PATH="/metrics"
 NAMESPACE="${DEFAULT_NAMESPACE}"
-REPO_URL="${DEFAULT_REPO_URL}"
 TARGET_REVISION="${DEFAULT_TARGET_REVISION}"
 PERSISTENCE_ENABLED="false"
 STORAGE_SIZE=""
@@ -34,6 +32,11 @@ STORAGE_MOUNT="/data"
 if [[ -z "${SERVICE_NAME}" ]]; then
   echo "ERROR: Missing service name"
   echo "Usage: ./scripts/add-service.sh <service-name> [--image-repo <repo>] [--image-tag <tag>] [--container-port <port>] [--service-port <port>] [--health-path <path>] [--metrics-path <path>]"
+  exit 1
+fi
+
+if ! command -v helm >/dev/null 2>&1; then
+  echo "ERROR: helm is required for scaffold validation"
   exit 1
 fi
 
@@ -77,14 +80,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --namespace)
       NAMESPACE="${2:-}"
-      shift 2
-      ;;
-    --repo-url)
-      REPO_URL="${2:-}"
-      shift 2
-      ;;
-    --target-revision)
-      TARGET_REVISION="${2:-}"
       shift 2
       ;;
     --storage-size)
@@ -308,11 +303,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
 EOF
-
-if ! command -v helm >/dev/null 2>&1; then
-  echo "ERROR: helm is required for scaffold validation"
-  exit 1
-fi
 
 helm template "${SERVICE_NAME}" "${CHART_DIR}" >/dev/null
 

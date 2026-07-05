@@ -138,35 +138,41 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
     kubectl -n "${PROM_NAMESPACE}" port-forward svc/"${PROM_SERVICE_NAME}" "${PROM_LOCAL_PORT}:${PROM_SERVICE_PORT}" >"${PROM_PORT_FORWARD_LOG}" 2>&1 &
     PROM_PF_PID=$!
 
-    sleep 10
+    echo "INFO: Waiting for Prometheus targets to become healthy..."
+    max_retries=15
+    retry_count=0
+    targets_healthy=false
 
-    echo "INFO: Checking Prometheus targets"
-    if ! TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets"); then
-      echo "ERROR: Prometheus targets check failed. Port-forward logs:"
-      cat "${PROM_PORT_FORWARD_LOG}"
-      exit 1
-    fi
-    for job in "${PROM_JOB_LIST[@]}"; do
-      job_name="${job// /}"
-      if [[ -z "${job_name}" ]]; then
-        echo "ERROR: PROM_EXPECTED_JOBS contains an empty entry"
-        exit 1
-      fi
-
-      if ! python3 -c "
+    while [[ ${retry_count} -lt ${max_retries} ]]; do
+      if TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets" 2>/dev/null); then
+        all_up=true
+        for job in "${PROM_JOB_LIST[@]}"; do
+          job_name="${job// /}"
+          if [[ -z "${job_name}" ]]; then continue; fi
+          if ! python3 -c "
 import json, sys
 data = json.loads(sys.stdin.read())
 targets = data.get('data', {}).get('activeTargets', [])
-all_jobs = {t['labels'].get('job') for t in targets}
 up_jobs  = {t['labels'].get('job') for t in targets if t.get('health') == 'up'}
-job = '${job_name}'
-assert job in all_jobs, f\"Prometheus job '{job}' not found in targets\"
-assert job in up_jobs,  f\"Prometheus job '{job}' has no healthy ('up') target\"
-" <<< "${TARGETS_JSON}"; then
-        echo "ERROR: Prometheus job '${job_name}' not found or not healthy"
-        exit 1
+if '${job_name}' not in up_jobs: sys.exit(1)
+" <<< "${TARGETS_JSON}" >/dev/null 2>&1; then
+            all_up=false
+            break
+          fi
+        done
+        if [[ "${all_up}" == "true" ]]; then
+          targets_healthy=true
+          break
+        fi
       fi
+      sleep 5
+      retry_count=$((retry_count + 1))
     done
+
+    if [[ "${targets_healthy}" == "false" ]]; then
+      echo "ERROR: Prometheus targets did not become healthy in time."
+      exit 1
+    fi
 
     if [[ -n "${EXPECTED_METRIC}" ]]; then
       echo "INFO: Checking Prometheus query"

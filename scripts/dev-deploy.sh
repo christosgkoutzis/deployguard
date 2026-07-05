@@ -87,6 +87,15 @@ echo "INFO: Starting local Helm repository server..."
 docker stop deployguard-helm-server >/dev/null 2>&1 || true
 docker run -d --rm --name deployguard-helm-server -p 8081:80 -v "${REPO_ROOT}/platform/charts:/usr/share/nginx/html" nginx:alpine >/dev/null
 
+echo "INFO: Waiting for Helm repository server to be ready..."
+wait_time=0
+while ! curl -fsS http://127.0.0.1:8081/index.yaml >/dev/null 2>&1; do
+  sleep 1
+  wait_time=$((wait_time + 1))
+  if [[ ${wait_time} -ge 15 ]]; then echo "ERROR: Helm server failed to start in time"; exit 1; fi
+done
+
+
 echo "INFO: Registering ArgoCD applications..."
 for app in "${ARGO_APPS[@]}"; do
   app_name="${app// /}"

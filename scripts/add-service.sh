@@ -27,6 +27,9 @@ METRICS_PATH="/metrics"
 NAMESPACE="${DEFAULT_NAMESPACE}"
 REPO_URL="${DEFAULT_REPO_URL}"
 TARGET_REVISION="${DEFAULT_TARGET_REVISION}"
+PERSISTENCE_ENABLED="false"
+STORAGE_SIZE=""
+STORAGE_MOUNT="/data"
 
 if [[ -z "${SERVICE_NAME}" ]]; then
   echo "ERROR: Missing service name"
@@ -82,6 +85,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --target-revision)
       TARGET_REVISION="${2:-}"
+      shift 2
+      ;;
+    --storage-size)
+      STORAGE_SIZE="${2:-}"
+      PERSISTENCE_ENABLED="true"
+      shift 2
+      ;;
+    --storage-mount)
+      STORAGE_MOUNT="${2:-}"
       shift 2
       ;;
     *)
@@ -178,13 +190,22 @@ livenessProbe:
 
 metrics:
   path: ${METRICS_PATH}
+
+persistence:
+  enabled: ${PERSISTENCE_ENABLED}
+  size: "${STORAGE_SIZE}"
+  mountPath: "${STORAGE_MOUNT}"
 EOF
 
 cat > "${CHART_TEMPLATES_DIR}/service.yaml" <<'EOF'
 apiVersion: apps/v1
+{{- if .Values.persistence.enabled }}
+kind: StatefulSet
+{{- else }}
 kind: Deployment
+{{- end }}
 metadata:
-  name: {{ .Release.Name }}-deployment
+  name: {{ .Release.Name }}-workload
   labels:
     app: {{ .Release.Name }}
     tenant: {{ .Values.tenant.label }}
@@ -193,6 +214,9 @@ spec:
   selector:
     matchLabels:
       app: {{ .Release.Name }}
+{{- if .Values.persistence.enabled }}
+  serviceName: {{ .Release.Name }}-service
+{{- end }}
   template:
     metadata:
       labels:
@@ -230,6 +254,19 @@ spec:
         env:
         - name: TENANT_ID
           value: {{ .Values.tenant.id | quote }}
+{{- if .Values.persistence.enabled }}
+        volumeMounts:
+        - name: persistent-storage
+          mountPath: {{ .Values.persistence.mountPath | quote }}
+  volumeClaimTemplates:
+  - metadata:
+      name: persistent-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.persistence.size }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

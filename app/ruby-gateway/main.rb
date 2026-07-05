@@ -28,15 +28,39 @@ end
 
 get '/' do
   message = fetch_backend_message
+  db_message = params[:db_message] || ""
   content_type :html
   <<~HTML
     <html>
       <body>
-        <h1>Hello from Ruby Gateway!</h1>
-        <p>Message from Python Backend: <strong>#{message}</strong></p>
+        <h3>Hello from Ruby Gateway!</h3>
+        <h3>Message from Python Backend: <strong>#{message}</strong></h3>
+        <hr/>
+        <h3>Database Actions</h3>
+        <form action="/write" method="POST" style="display:inline;">
+          <button type="submit">Write Greeting</button>
+        </form>
+        <form action="/read" method="GET" style="display:inline;">
+          <button type="submit">Read Latest Greeting</button>
+        </form>
+        <p><i>#{db_message}</i></p>
       </body>
     </html>
   HTML
+end
+
+post '/write' do
+  uri = URI("#{BACKEND_URL}/db/write")
+  Net::HTTP.post(uri, "")
+  redirect '/?db_message=Successfully wrote to database'
+end
+
+get '/read' do
+  uri = URI("#{BACKEND_URL}/db/read")
+  response = Net::HTTP.get_response(uri)
+  data = JSON.parse(response.body)
+  msg = data['greeting'] || data['error'] || 'No greetings yet'
+  redirect "/?db_message=Message from SQL database: #{msg}"
 end
 
 helpers do

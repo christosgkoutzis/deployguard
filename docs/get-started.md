@@ -40,6 +40,16 @@ This creates:
 - `platform/gitops/python-backend.yaml`
 - `platform/gitops/ruby-gateway.yaml`
 
+### Customizing Scaffold Outputs (Optional)
+If your service needs custom ports, metrics paths, or stateful storage (PVC), create a `service.contract.env` file in the service directory (e.g., `app/<service-name>/service.contract.env`) **before** running `add-service.sh`. 
+
+Example `app/sql-database/service.contract.env` for a stateful HTTP service:
+```env
+PERSISTENCE_ENABLED="true"
+STORAGE_SIZE="100Mi"
+STORAGE_MOUNT="/data"
+```
+
 ## 4) Build, Import, Sync, and Wait
 
 ```bash

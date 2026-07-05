@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
 IMAGE_TAG="${IMAGE_TAG:-v1}"
 ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
-ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,prometheus}"
+ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,sql-database,prometheus}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-300}"
 SKIP_VERIFY="${SKIP_VERIFY:-false}"
 # Platform apps that have no app/ directory to build from

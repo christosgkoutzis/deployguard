@@ -1,10 +1,12 @@
 import os
 import time
+import requests
 import datetime
 from fastapi import FastAPI, Request, Response
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 APP_NAME = os.getenv("APP_NAME", "python-backend")
+SQL_DB_URL = os.getenv("SQL_DB_URL", "http://sql-database-service:80")
 
 app = FastAPI(title=APP_NAME)
 
@@ -44,3 +46,19 @@ def get_message():
 @app.get("/metrics")
 def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.get("/db/read")
+def read_db():
+    try:
+        r = requests.get(f"{SQL_DB_URL}/db/greeting", timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/db/write")
+def write_db():
+    try:
+        r = requests.post(f"{SQL_DB_URL}/db/greeting", timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}

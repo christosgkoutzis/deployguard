@@ -18,7 +18,7 @@ If a service meets all requirements below and still fails in local cluster deplo
 1. Single container HTTP service.
 2. Service must expose a health endpoint path provided to scaffold input.
 3. Service must expose a Prometheus metrics endpoint path provided to scaffold input.
-4. Service must be stateless.
+4. Service may optionally be stateful (creates a StatefulSet) if it requires a PVC mount, but must still expose HTTP health/metrics.
 
 ## Required Build/Deploy Assumptions
 
@@ -26,7 +26,7 @@ If a service meets all requirements below and still fails in local cluster deplo
 2. Service listens on a single main HTTP port and is reachable through Kubernetes Service mapping.
 3. Scaffold supports defaults and optional overrides:
    - defaults: image repo `<service-name>`, image tag `v1`, container port `8000`, service port `80`, health path `/health`, metrics path `/metrics`
-   - overrides: CLI flags and optional `app/<service-name>/service.contract.env`
+   - overrides: CLI flags (including `--storage-size`, `--storage-mount`) and optional `app/<service-name>/service.contract.env`
 
 ## Supported Technology Scope
 
@@ -36,7 +36,7 @@ If a service meets all requirements below and still fails in local cluster deplo
 ## Explicitly Unsupported Cases 
 
 1. Multi-container pods or sidecar-dependent workloads.
-2. Stateful services requiring persistent data guarantees.
+2. Stateful services that require complex clustering (e.g. multi-node databases). Single-node HTTP-wrapped stateful services are supported.
 3. Services without HTTP health and metrics endpoints.
 4. Complex ingress, mTLS, or custom network policy requirements.
 5. Direct remote Git repository onboarding (input is local service folder only).

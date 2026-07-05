@@ -63,11 +63,28 @@ for release in "${RELEASE_LIST[@]}"; do
   fi
 
   service_name="${release_name}-service"
-  deployment_name="${release_name}-deployment"
   port_forward_log="/tmp/${release_name}-port-forward.log"
 
-  echo "INFO: Waiting for deployment rollout for ${deployment_name}"
-  kubectl -n "${NAMESPACE}" rollout status deployment/"${deployment_name}" --timeout=120s
+  echo "INFO: Checking PVCs for ${release_name} (if applicable)"
+  pvc_list=$(kubectl -n "${NAMESPACE}" get pvc -l "app=${release_name}" -o jsonpath="{.items[*].metadata.name}" 2>/dev/null || true)
+  for pvc in ${pvc_list}; do
+    phase=$(kubectl -n "${NAMESPACE}" get pvc "${pvc}" -o jsonpath='{.status.phase}')
+    if [[ "${phase}" != "Bound" ]]; then
+      echo "ERROR: PVC '${pvc}' is in state '${phase}', expected 'Bound'"
+      exit 1
+    fi
+    echo "INFO: PVC '${pvc}' successfully Bound"
+  done
+
+  echo "INFO: Waiting for workload rollout for ${release_name}"
+  workload_type=$(kubectl -n "${NAMESPACE}" get deploy,sts -l "app=${release_name}" -o jsonpath='{.items[0].kind}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+  workload_name=$(kubectl -n "${NAMESPACE}" get deploy,sts -l "app=${release_name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  
+  if [[ -z "${workload_name}" ]]; then
+    echo "ERROR: Could not detect Deployment or StatefulSet for ${release_name}"
+    exit 1
+  fi
+  kubectl -n "${NAMESPACE}" rollout status "${workload_type}/${workload_name}" --timeout=120s
 
   echo "INFO: Starting temporary port-forward for ${service_name}"
   kubectl -n "${NAMESPACE}" port-forward svc/"${service_name}" "${LOCAL_PORT}:${SERVICE_PORT}" >"${port_forward_log}" 2>&1 &

@@ -179,9 +179,22 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
       if TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets" 2>/dev/null); then
         all_up=true
         for job in "${PROM_JOB_LIST[@]}"; do
-          job_name="${job// /}"
-          if [[ -z "${job_name}" ]]; then continue; fi
-          if ! python3 -c "
+              job_name="${job// /}"
+              if [[ -z "${job_name}" ]]; then continue; fi
+              
+              is_mock_job="false"
+              if [[ -n "${MOCK_APP_NAMES:-}" ]]; then
+                IFS=',' read -r -a mock_job_arr <<< "${MOCK_APP_NAMES}"
+                for m in "${mock_job_arr[@]}"; do
+                  if [[ "${m// /}" == "${job_name}" ]]; then
+                    is_mock_job="true"
+                    break
+                  fi
+                done
+              fi
+              if [[ "${is_mock_job}" == "true" ]]; then continue; fi
+
+              if ! python3 -c "
 import json, sys
 data = json.loads(sys.stdin.read())
 targets = data.get('data', {}).get('activeTargets', [])

@@ -43,7 +43,7 @@ jobs:
             services+=("$(basename "${dir}")")
           done
           app_names="$(IFS=','; echo "${services[*]}")"
-          ARGO_APP_NAMES="${app_names},prometheus" ./scripts/dev-deploy.sh
+          MOCK_APP_NAMES="external-api-mock" ARGO_APP_NAMES="${app_names},prometheus" ./scripts/dev-deploy.sh
 
       - name: Verify Ecosystem Health
-        run: ./scripts/verify.sh
+        run: MOCK_APP_NAMES="external-api-mock" ./scripts/verify.sh

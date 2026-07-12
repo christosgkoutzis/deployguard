@@ -77,6 +77,22 @@ for release in "${RELEASE_LIST[@]}"; do
   service_name="${release_name}-service"
   port_forward_log="/tmp/${release_name}-port-forward.log"
 
+  is_mock="false"
+  if [[ -n "${MOCK_APP_NAMES:-}" ]]; then
+    IFS=',' read -r -a mock_array <<< "${MOCK_APP_NAMES}"
+    for m in "${mock_array[@]}"; do
+      if [[ "${m// /}" == "${release_name}" ]]; then
+        is_mock="true"
+        break
+      fi
+    done
+  fi
+
+  local_health_path="${HEALTH_PATH}"
+  if [[ "${is_mock}" == "true" ]]; then
+    local_health_path="/__admin/"
+  fi
+
   echo "INFO: Checking PVCs for ${release_name} (if applicable)"
   pvc_list=$(kubectl -n "${NAMESPACE}" get pvc -l "app=${release_name}" -o jsonpath="{.items[*].metadata.name}" 2>/dev/null || true)
   for pvc in ${pvc_list}; do
@@ -104,33 +120,37 @@ for release in "${RELEASE_LIST[@]}"; do
 
 # Wait for port-forward to actually start accepting connections (timeout 10s)
   wait_time=0
-  while ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}" >/dev/null 2>&1; do
+  while ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${local_health_path}" >/dev/null 2>&1; do
     sleep 1
     wait_time=$((wait_time + 1))
     if [[ ${wait_time} -ge 10 ]]; then echo "ERROR: Port-forward timeout for ${release_name}"; exit 1; fi
   done
 
-  echo "INFO: Checking ${HEALTH_PATH} for ${release_name}"
-  if ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}" >/dev/null; then
-    echo "ERROR: Health endpoint ${HEALTH_PATH} failed for ${release_name}"
+  echo "INFO: Checking ${local_health_path} for ${release_name}"
+  if ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${local_health_path}" >/dev/null; then
+    echo "ERROR: Health endpoint ${local_health_path} failed for ${release_name}"
     exit 1
   fi
 
-  echo "INFO: Checking ${METRICS_PATH} for ${release_name}"
-  if ! METRICS_BODY=$(curl -fsS "http://127.0.0.1:${LOCAL_PORT}${METRICS_PATH}"); then
-    echo "ERROR: Metrics endpoint ${METRICS_PATH} unreachable for ${release_name}"
-    exit 1
-  fi
-  if [[ -n "${EXPECTED_METRIC}" ]]; then
-    if ! echo "${METRICS_BODY}" | grep -q "${EXPECTED_METRIC}"; then
-      echo "ERROR: Expected metric '${EXPECTED_METRIC}' not found for ${release_name}"
+  if [[ "${is_mock}" == "false" ]]; then
+    echo "INFO: Checking ${METRICS_PATH} for ${release_name}"
+    if ! METRICS_BODY=$(curl -fsS "http://127.0.0.1:${LOCAL_PORT}${METRICS_PATH}"); then
+      echo "ERROR: Metrics endpoint ${METRICS_PATH} unreachable for ${release_name}"
       exit 1
+    fi
+    if [[ -n "${EXPECTED_METRIC}" ]]; then
+      if ! echo "${METRICS_BODY}" | grep -q "${EXPECTED_METRIC}"; then
+        echo "ERROR: Expected metric '${EXPECTED_METRIC}' not found for ${release_name}"
+        exit 1
+      fi
+    else
+      if ! echo "${METRICS_BODY}" | grep -Eq '# HELP|# TYPE'; then
+        echo "ERROR: No Prometheus metrics format detected for ${release_name}"
+        exit 1
+      fi
     fi
   else
-    if ! echo "${METRICS_BODY}" | grep -Eq '# HELP|# TYPE'; then
-      echo "ERROR: No Prometheus metrics format detected for ${release_name}"
-      exit 1
-    fi
+    echo "INFO: Skipping metrics check for mock service ${release_name}"
   fi
 
   kill "${PF_PID}" >/dev/null 2>&1 || true

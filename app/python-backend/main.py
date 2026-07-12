@@ -7,6 +7,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 
 APP_NAME = os.getenv("APP_NAME", "python-backend")
 SQL_DB_URL = os.getenv("SQL_DB_URL", "http://sql-database-service:80")
+EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL", "http://external-api-mock-service:80")
 
 app = FastAPI(title=APP_NAME)
 
@@ -41,6 +42,14 @@ def health_check():
 @app.get("/message")
 def get_message():
     return {"message": f"Hello from {APP_NAME}!"}
+
+@app.get("/mock-greeting")
+def get_mock_greeting():
+    try:
+        r = requests.get(f"{EXTERNAL_API_URL}/api/greeting", timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e), "source": "Failed to reach External API Mock"}
 
 
 @app.get("/metrics")

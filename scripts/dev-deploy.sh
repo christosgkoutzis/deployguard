@@ -45,6 +45,16 @@ for app in "${ARGO_APPS[@]}"; do
   [[ -n "${app_name}" ]] && SANITIZED_APPS+=("${app_name}")
 done
 
+MOCK_APP_NAMES="${MOCK_APP_NAMES:-}"
+declare -a MOCK_APPS_LIST=()
+if [[ -n "${MOCK_APP_NAMES// }" ]]; then
+  IFS=',' read -r -a raw_mocks <<< "${MOCK_APP_NAMES}"
+  for m in "${raw_mocks[@]}"; do
+    m_name="${m// /}"
+    [[ -n "${m_name}" ]] && MOCK_APPS_LIST+=("${m_name}")
+  done
+fi
+
 is_platform_app() {
   local target="$1"
   for p_app in "${PLATFORM_APPS_LIST[@]}"; do
@@ -52,6 +62,112 @@ is_platform_app() {
   done
   return 1
 }
+
+# Generate Helm charts and GitOps manifests for Mock services dynamically
+for mock_name in "${MOCK_APPS_LIST[@]}"; do
+  MOCK_DIR="${REPO_ROOT}/platform/mocks/${mock_name}"
+  if [[ ! -d "${MOCK_DIR}" ]]; then
+    echo "ERROR: Mock directory not found: platform/mocks/${mock_name}"
+    exit 1
+  fi
+
+  CHART_DIR="${REPO_ROOT}/platform/charts/${mock_name}"
+  mkdir -p "${CHART_DIR}/templates"
+
+  cat > "${CHART_DIR}/Chart.yaml" <<EOF
+apiVersion: v2
+name: ${mock_name}
+description: WireMock chart for ${mock_name}
+type: application
+version: 0.1.0
+EOF
+
+  cat > "${CHART_DIR}/templates/configmap.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-mocks
+data:
+EOF
+  for json_file in "${MOCK_DIR}"/*.json; do
+    if [[ -f "${json_file}" ]]; then
+      echo "  $(basename "${json_file}"): |" >> "${CHART_DIR}/templates/configmap.yaml"
+      sed 's/^/    /' "${json_file}" >> "${CHART_DIR}/templates/configmap.yaml"
+    fi
+  done
+
+  cat > "${CHART_DIR}/templates/wiremock.yaml" <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-deployment
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+      - name: wiremock
+        image: wiremock/wiremock:3.3.1
+        args: ["--global-response-templating", "--disable-gzip"]
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: mock-data
+          mountPath: /home/wiremock/mappings
+        readinessProbe:
+          httpGet:
+            path: /__admin/
+            port: 8080
+          initialDelaySeconds: 2
+      volumes:
+      - name: mock-data
+        configMap:
+          name: {{ .Release.Name }}-mocks
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-service
+spec:
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+EOF
+
+  cat > "${REPO_ROOT}/platform/gitops/${mock_name}.yaml" <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${mock_name}
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://host.k3d.internal:8081
+    chart: ${mock_name}
+    targetRevision: 0.1.0
+    helm:
+      releaseName: ${mock_name}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: deployguard
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+EOF
+done
 
 # Initialize array to collect images for batch import
 declare -a IMAGES_TO_IMPORT=()
@@ -82,7 +198,7 @@ if [[ ${#IMAGES_TO_IMPORT[@]} -gt 0 ]]; then
 fi
 
 echo "INFO: Packaging Helm charts for local distribution..."
-for app_name in "${SANITIZED_APPS[@]}"; do
+for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
   if [[ -d "${REPO_ROOT}/platform/charts/${app_name}" ]]; then
     helm package "${REPO_ROOT}/platform/charts/${app_name}" -d "${REPO_ROOT}/platform/charts" >/dev/null
   fi
@@ -103,14 +219,14 @@ done
 
 
 echo "INFO: Registering ArgoCD applications..."
-for app_name in "${SANITIZED_APPS[@]}"; do
+for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
   manifest="${REPO_ROOT}/platform/gitops/${app_name}.yaml"
   if [[ -f "${manifest}" ]]; then
     kubectl apply -f "${manifest}" >/dev/null
   fi
 done
 
-for app_name in "${SANITIZED_APPS[@]}"; do
+for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
   if ! kubectl -n "${ARGO_APP_NAMESPACE}" get application "${app_name}" >/dev/null 2>&1; then
     echo "ERROR: ArgoCD Application '${app_name}' not found in namespace '${ARGO_APP_NAMESPACE}'"
     echo "ERROR: Run ./scripts/bootstrap-platform.sh first"
@@ -147,10 +263,10 @@ if [[ "${SKIP_VERIFY}" == "true" ]]; then
   echo "INFO: SKIP_VERIFY=true, skipping verification"
 else
   echo "INFO: Running verification"
-  VERIFY_RELEASE_NAMES="${VERIFY_RELEASE_NAMES:-}"
+VERIFY_RELEASE_NAMES="${VERIFY_RELEASE_NAMES:-}"
   if [[ -z "${VERIFY_RELEASE_NAMES// }" ]]; then
     release_list=()
-    for app_name in "${SANITIZED_APPS[@]}"; do
+    for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
       is_platform_app "${app_name}" || release_list+=("${app_name}")
     done
     if [[ ${#release_list[@]} -eq 0 ]]; then
@@ -163,6 +279,7 @@ else
   VERIFY_PROM_EXPECTED_JOBS="${VERIFY_PROM_EXPECTED_JOBS:-${ARGO_APP_NAMES}}"
 
   RELEASE_NAMES="${VERIFY_RELEASE_NAMES}" \
+  MOCK_APP_NAMES="${MOCK_APP_NAMES:-}" \
   PROM_EXPECTED_JOBS="${VERIFY_PROM_EXPECTED_JOBS}" \
   EXPECTED_METRIC="${EXPECTED_METRIC:-}" \
   HEALTH_PATH="${HEALTH_PATH:-/health}" \

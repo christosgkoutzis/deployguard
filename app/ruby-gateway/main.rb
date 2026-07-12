@@ -28,6 +28,7 @@ end
 
 get '/' do
   message = fetch_backend_message
+  mocked_greeting = fetch_mocked_greeting
   db_message = params[:db_message] || ""
   content_type :html
   <<~HTML
@@ -35,6 +36,7 @@ get '/' do
       <body>
         <h3>Hello from Ruby Gateway!</h3>
         <h3>Message from Python Backend: <strong>#{message}</strong></h3>
+        <h4>Greeting from External Mock API: <strong>#{mocked_greeting}</strong></h4>
         <hr/>
         <h3>Database Actions</h3>
         <form action="/write" method="POST" style="display:inline;">
@@ -70,5 +72,14 @@ helpers do
     JSON.parse(response.body)['message']
   rescue => e
     "Backend unavailable: #{e.message}"
+  end
+
+  def fetch_mocked_greeting
+    uri = URI("#{BACKEND_URL}/mock-greeting")
+    response = Net::HTTP.get_response(uri)
+    data = JSON.parse(response.body)
+    data['greeting'] || data['error'] || 'No greeting available'
+  rescue => e
+    "Mocked Greeting API unavailable: #{e.message}"
   end
 end

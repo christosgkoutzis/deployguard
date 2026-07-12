@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/api/greeting"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "type": "greeting",
+      "value": "Hello from the mocked API!",
+      "source": "Mocked External API"
+    }
+  }
+}

@@ -55,17 +55,6 @@ fi
 
 IFS=',' read -r -a RELEASE_LIST <<< "${RELEASE_NAMES}"
 
-# Kill any existing port-forward processes on exit
-cleanup() {
-  if [[ -n "${PF_PID:-}" ]]; then
-    kill "${PF_PID}" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "${PROM_PF_PID:-}" ]]; then
-    kill "${PROM_PF_PID}" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
-
 for release in "${RELEASE_LIST[@]}"; do
   release_name="${release// /}"
 
@@ -114,27 +103,25 @@ for release in "${RELEASE_LIST[@]}"; do
   fi
   kubectl -n "${NAMESPACE}" rollout status "${workload_type}/${workload_name}" --timeout=120s
 
-  echo "INFO: Starting temporary port-forward for ${service_name}"
-  kubectl -n "${NAMESPACE}" port-forward svc/"${service_name}" "${LOCAL_PORT}:${SERVICE_PORT}" >"${port_forward_log}" 2>&1 &
-  PF_PID=$!
-
-# Wait for port-forward to actually start accepting connections (timeout 10s)
+app_url="http://${release_name}.127.0.0.1.nip.io:8080"
+  
+  echo "INFO: Waiting for Ingress routing to become active for ${release_name}"
   wait_time=0
-  while ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${local_health_path}" >/dev/null 2>&1; do
-    sleep 1
+  while ! curl -fsS "${app_url}${local_health_path}" >/dev/null 2>&1; do
+    sleep 2
     wait_time=$((wait_time + 1))
-    if [[ ${wait_time} -ge 10 ]]; then echo "ERROR: Port-forward timeout for ${release_name}"; exit 1; fi
+    if [[ ${wait_time} -ge 15 ]]; then echo "ERROR: Ingress routing timeout for ${release_name}"; exit 1; fi
   done
 
   echo "INFO: Checking ${local_health_path} for ${release_name}"
-  if ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}${local_health_path}" >/dev/null; then
+  if ! curl -fsS "${app_url}${local_health_path}" >/dev/null; then
     echo "ERROR: Health endpoint ${local_health_path} failed for ${release_name}"
     exit 1
   fi
 
   if [[ "${is_mock}" == "false" ]]; then
     echo "INFO: Checking ${METRICS_PATH} for ${release_name}"
-    if ! METRICS_BODY=$(curl -fsS "http://127.0.0.1:${LOCAL_PORT}${METRICS_PATH}"); then
+    if ! METRICS_BODY=$(curl -fsS "${app_url}${METRICS_PATH}"); then
       echo "ERROR: Metrics endpoint ${METRICS_PATH} unreachable for ${release_name}"
       exit 1
     fi
@@ -152,10 +139,6 @@ for release in "${RELEASE_LIST[@]}"; do
   else
     echo "INFO: Skipping metrics check for mock service ${release_name}"
   fi
-
-  kill "${PF_PID}" >/dev/null 2>&1 || true
-  wait "${PF_PID}" 2>/dev/null || true
-  unset PF_PID
 done
 
 if [[ "${VERIFY_MONITORING}" == "true" ]]; then
@@ -166,17 +149,14 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
   IFS=',' read -r -a PROM_JOB_LIST <<< "${PROM_EXPECTED_JOBS}"
 
   if kubectl -n "${PROM_NAMESPACE}" get svc "${PROM_SERVICE_NAME}" >/dev/null 2>&1; then
-    echo "INFO: Starting Prometheus port-forward"
-    kubectl -n "${PROM_NAMESPACE}" port-forward svc/"${PROM_SERVICE_NAME}" "${PROM_LOCAL_PORT}:${PROM_SERVICE_PORT}" >"${PROM_PORT_FORWARD_LOG}" 2>&1 &
-    PROM_PF_PID=$!
-
-    echo "INFO: Waiting for Prometheus targets to become healthy..."
+    prom_url="http://prometheus.127.0.0.1.nip.io:8080"
+    echo "INFO: Waiting for Prometheus targets to become healthy via Ingress..."
     max_retries=15
     retry_count=0
     targets_healthy=false
 
     while [[ ${retry_count} -lt ${max_retries} ]]; do
-      if TARGETS_JSON=$(curl -fsS "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/targets" 2>/dev/null); then
+      if TARGETS_JSON=$(curl -fsS "${prom_url}/api/v1/targets" 2>/dev/null); then
         all_up=true
         for job in "${PROM_JOB_LIST[@]}"; do
               job_name="${job// /}"
@@ -221,9 +201,8 @@ if '${job_name}' not in up_jobs: sys.exit(1)
 
     if [[ -n "${EXPECTED_METRIC}" ]]; then
       echo "INFO: Checking Prometheus query"
-      if ! QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "http://127.0.0.1:${PROM_LOCAL_PORT}/api/v1/query"); then
-        echo "ERROR: Prometheus query check failed. Port-forward logs:"
-        cat "${PROM_PORT_FORWARD_LOG}"
+      if ! QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "${prom_url}/api/v1/query"); then
+        echo "ERROR: Prometheus query check failed."
         exit 1
       fi
       if ! echo "${QUERY_JSON}" | grep -q '"status":"success"'; then

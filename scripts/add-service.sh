@@ -190,6 +190,11 @@ persistence:
   enabled: ${PERSISTENCE_ENABLED}
   size: "${STORAGE_SIZE}"
   mountPath: "${STORAGE_MOUNT}"
+
+ingress:
+  enabled: true
+  className: "traefik"
+  host: "${SERVICE_NAME}.127.0.0.1.nip.io"
 EOF
 
 cat > "${CHART_TEMPLATES_DIR}/service.yaml" <<'EOF'
@@ -280,6 +285,24 @@ spec:
       port: {{ .Values.service.port }}
       targetPort: {{ .Values.service.targetPort }}
   type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-service
+                port:
+                  number: {{ .Values.service.port }}
 EOF
 
 cat > "${GITOPS_FILE}" <<EOF

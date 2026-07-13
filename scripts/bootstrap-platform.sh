@@ -17,6 +17,10 @@ echo "INFO: Installing/Upgrading ArgoCD..."
 helm upgrade --install argocd argo/argo-cd \
     --namespace argocd \
     --set server.service.type=ClusterIP \
+    --set server.ingress.enabled=true \
+    --set server.ingress.ingressClassName=traefik \
+    --set "server.ingress.hosts[0]=argocd.127.0.0.1.nip.io" \
+    --set configs.params."server\.insecure"=true \
     --wait
 
 echo "INFO: Applying ArgoCD application manifests..."

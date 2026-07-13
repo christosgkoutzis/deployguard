@@ -144,6 +144,24 @@ spec:
       port: 80
       targetPort: 8080
   type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ .Release.Name }}.127.0.0.1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-service
+                port:
+                  number: 80
 EOF
 
   cat > "${REPO_ROOT}/platform/gitops/${mock_name}.yaml" <<EOF

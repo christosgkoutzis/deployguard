@@ -69,35 +69,27 @@ Checks rollout, health endpoint, metrics endpoint, and Prometheus scraping.
 
 ## 6) Validate Service-to-Service Communication
 
-Port-forward Ruby gateway and open/curl it:
+All services are accessible out-of-the-box via Traefik Ingress on port 8080 using `nip.io` wildcard DNS. No port-forwarding required!
 
+Open your browser or run:
 ```bash
-kubectl -n deployguard port-forward svc/ruby-gateway-service 8080:80
-curl http://127.0.0.1:8080/
+curl http://ruby-gateway.127.0.0.1.nip.io:8080/
 ```
-
-Expected behavior: Ruby page includes a message fetched from Python backend.
+Expected behavior: Ruby page includes a message fetched from Python backend and the Mock API.
 
 Optional direct Python check:
-
 ```bash
-kubectl -n deployguard port-forward svc/python-backend-service 8081:80
-curl http://127.0.0.1:8081/message
+curl http://python-backend.127.0.0.1.nip.io:8080/message
 ```
 
-## 7) Check ArgoCD and Prometheus
+## 7) Check Platform Ecosystem
 
-ArgoCD:
+ArgoCD Dashboard:
+Open **[http://argocd.127.0.0.1.nip.io:8080](http://argocd.127.0.0.1.nip.io:8080)**
+*(Username: `admin`, get password via `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`)*
 
-```bash
-kubectl -n argocd port-forward svc/argocd-server 8082:80
-```
-
-Prometheus:
-
-```bash
-kubectl -n monitoring port-forward svc/prometheus-server 9090:80
-```
+Prometheus Dashboard:
+Open **[http://prometheus.127.0.0.1.nip.io:8080](http://prometheus.127.0.0.1.nip.io:8080)**
 
 ## Acceptance Criteria
 

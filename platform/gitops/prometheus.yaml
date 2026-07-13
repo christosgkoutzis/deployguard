@@ -21,6 +21,11 @@ spec:
         pushgateway:
           enabled: false
         server:
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - prometheus.127.0.0.1.nip.io
           persistentVolume:
             enabled: false
         serverFiles:

@@ -28,6 +28,7 @@ TARGET_REVISION="${DEFAULT_TARGET_REVISION}"
 PERSISTENCE_ENABLED="false"
 STORAGE_SIZE=""
 STORAGE_MOUNT="/data"
+INIT_COMMAND=""
 
 if [[ -z "${SERVICE_NAME}" ]]; then
   echo "ERROR: Missing service name"
@@ -191,6 +192,8 @@ persistence:
   size: "${STORAGE_SIZE}"
   mountPath: "${STORAGE_MOUNT}"
 
+initCommand: "${INIT_COMMAND:-}"
+
 ingress:
   enabled: true
   className: "traefik"
@@ -300,9 +303,41 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ .Release.Name }}-service
+name: {{ .Release.Name }}-service
                 port:
                   number: {{ .Values.service.port }}
+---
+{{- if .Values.initCommand }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-init
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-init
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: init-task
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["/bin/sh", "-c"]
+        args: [{{ .Values.initCommand | quote }}]
+        env:
+        - name: TENANT_ID
+          value: {{ .Values.tenant.id | quote }}
+{{- if .Values.persistence.enabled }}
+        volumeMounts:
+        - name: persistent-storage
+          mountPath: {{ .Values.persistence.mountPath | quote }}
+{{- end }}
+{{- end }}
 EOF
 
 cat > "${GITOPS_FILE}" <<EOF

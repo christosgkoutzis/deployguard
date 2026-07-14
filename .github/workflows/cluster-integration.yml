@@ -30,6 +30,16 @@ jobs:
           ./scripts/setup.sh
           ./scripts/bootstrap-platform.sh
 
+      - name: Scaffold Dependencies
+        run: |
+          ./scripts/add-dependency.sh postgres \
+            --repo https://charts.bitnami.com/bitnami \
+            --chart postgresql \
+            --secret my-postgres-secret auth-password=secretpassword \
+            --set auth.existingSecret=my-postgres-secret \
+            --set auth.secretKeys.adminPasswordKey=auth-password \
+            --set primary.persistence.size=100Mi
+
       - name: Scaffold Services
         run: |
           for dir in app/*/; do
@@ -43,7 +53,7 @@ jobs:
             services+=("$(basename "${dir}")")
           done
           app_names="$(IFS=','; echo "${services[*]}")"
-          MOCK_APP_NAMES="external-api-mock" ARGO_APP_NAMES="${app_names},prometheus" ./scripts/dev-deploy.sh
+          PLATFORM_APPS="prometheus,postgres" MOCK_APP_NAMES="${mock_names}" ARGO_APP_NAMES="postgres,${app_names},prometheus" ./scripts/dev-deploy.sh
 
       - name: Verify Ecosystem Health
         run: MOCK_APP_NAMES="external-api-mock" ./scripts/verify.sh

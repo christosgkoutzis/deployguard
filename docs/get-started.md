@@ -24,30 +24,33 @@ Installs missing tools (`kubectl`, `k3d`, `helm`) and creates the local k3d clus
 
 Creates namespaces and installs ArgoCD. Also registers the Prometheus ArgoCD app.
 
-## 3) Scaffold Service Manifests (Template Flow)
+## 3) Scaffold Services & Dependencies
 
-Generate chart + ArgoCD app for each service in `app/<service-name>`:
+DeployGuard supports generic third-party dependencies securely via Kubernetes Secrets and Helm hooks. 
 
+First, add an external dependency (e.g., PostgreSQL) with auto-generated secrets:
+```bash
+./scripts/add-dependency.sh postgres \
+  --repo [https://charts.bitnami.com/bitnami](https://charts.bitnami.com/bitnami) \
+  --chart postgresql \
+  --secret my-postgres-secret auth-password=secretpassword \
+  --set auth.existingSecret=my-postgres-secret \
+  --set auth.secretKeys.adminPasswordKey=auth-password \
+  --set primary.persistence.size=100Mi
+```
+
+Then, generate chart + ArgoCD app for each internal service:
 ```bash
 ./scripts/add-service.sh python-backend
 ./scripts/add-service.sh ruby-gateway
 ```
 
-This creates:
+### Customizing Scaffold Outputs & Init Jobs
+If your service requires database migrations, custom ports, or storage, create a `service.contract.env` file in the service directory **before** running `add-service.sh`. 
 
-- `platform/charts/python-backend/`
-- `platform/charts/ruby-gateway/`
-- `platform/gitops/python-backend.yaml`
-- `platform/gitops/ruby-gateway.yaml`
-
-### Customizing Scaffold Outputs (Optional)
-If your service needs custom ports, metrics paths, or stateful storage (PVC), create a `service.contract.env` file in the service directory (e.g., `app/<service-name>/service.contract.env`) **before** running `add-service.sh`. 
-
-Example `app/sql-database/service.contract.env` for a stateful HTTP service:
+Example `app/python-backend/service.contract.env` defining a pre-install schema migration Hook:
 ```env
-PERSISTENCE_ENABLED="true"
-STORAGE_SIZE="100Mi"
-STORAGE_MOUNT="/data"
+INIT_COMMAND="python migrate.py"
 ```
 
 ## 4) Build, Import, Sync, and Wait

@@ -303,7 +303,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-name: {{ .Release.Name }}-service
+                name: {{ .Release.Name }}-service
                 port:
                   number: {{ .Values.service.port }}
 ---

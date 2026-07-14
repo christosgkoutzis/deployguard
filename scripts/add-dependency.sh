@@ -6,7 +6,7 @@ shift || true
 
 REPO_URL=""
 CHART_NAME=""
-TARGET_REVISION="HEAD"
+TARGET_REVISION=""
 NAMESPACE="deployguard"
 SECRET_NAME=""
 declare -a SECRET_KVS=()
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${APP_NAME}" || -z "${REPO_URL}" || -z "${CHART_NAME}" ]]; then
-  echo "Usage: ./scripts/add-dependency.sh <app-name> --repo <url> --chart <name> [--secret <secret-name> <key=val>] [--set <key=val>]"
+  echo "Usage: ./scripts/add-dependency.sh <app-name> --repo <url> --chart <name> [--version <ver>] [--secret <secret-name> <key=val>] [--set <key=val>]"
   exit 1
 fi
 
@@ -69,7 +69,13 @@ spec:
   source:
     repoURL: ${REPO_URL}
     chart: ${CHART_NAME}
-    targetRevision: "${TARGET_REVISION}"
+EOF
+
+if [[ -n "${TARGET_REVISION}" ]]; then
+  echo "    targetRevision: \"${TARGET_REVISION}\"" >> "${GITOPS_FILE}"
+fi
+
+cat >> "${GITOPS_FILE}" <<EOF
     helm:
       releaseName: ${APP_NAME}
 EOF
@@ -80,7 +86,7 @@ if [[ ${#SET_ARGS[@]} -gt 0 ]]; then
     key="${arg%%=*}"
     val="${arg#*=}"
     echo "        - name: ${key}" >> "${GITOPS_FILE}"
-    echo "          value: ${val}" >> "${GITOPS_FILE}"
+    echo "          value: \"${val}\"" >> "${GITOPS_FILE}"
   done
 fi
 

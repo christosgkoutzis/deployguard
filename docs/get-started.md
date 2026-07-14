@@ -30,13 +30,16 @@ DeployGuard supports generic third-party dependencies securely via Kubernetes Se
 
 First, add an external dependency (e.g., PostgreSQL) with auto-generated secrets:
 ```bash
-./scripts/add-dependency.sh postgres \
-  --repo [https://charts.bitnami.com/bitnami](https://charts.bitnami.com/bitnami) \
-  --chart postgresql \
-  --secret my-postgres-secret auth-password=secretpassword \
-  --set auth.existingSecret=my-postgres-secret \
-  --set auth.secretKeys.adminPasswordKey=auth-password \
-  --set primary.persistence.size=100Mi
+    ./scripts/add-dependency.sh postgres \
+      --repo https://charts.bitnami.com/bitnami \
+      --chart postgresql \
+      --version 15.1.0 \
+      --secret my-postgres-secret postgres-password=secretpassword \
+      --set global.postgresql.auth.existingSecret=my-postgres-secret \
+      --set auth.existingSecret=my-postgres-secret \
+      --set architecture=standalone \
+      --set primary.persistence.size=100Mi \
+      --set fullnameOverride=postgres
 ```
 
 Then, generate chart + ArgoCD app for each internal service:

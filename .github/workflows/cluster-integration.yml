@@ -32,13 +32,21 @@ jobs:
 
       - name: Scaffold Dependencies
         run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update bitnami
+          LATEST_PG_VERSION=$(helm search repo bitnami/postgresql | awk 'NR==2 {print $2}')
+          echo "INFO: Using dynamic PostgreSQL chart version: ${LATEST_PG_VERSION}"
+          
           ./scripts/add-dependency.sh postgres \
             --repo https://charts.bitnami.com/bitnami \
             --chart postgresql \
-            --secret my-postgres-secret auth-password=secretpassword \
+            --version "${LATEST_PG_VERSION}" \
+            --secret my-postgres-secret postgres-password=secretpassword \
+            --set global.postgresql.auth.existingSecret=my-postgres-secret \
             --set auth.existingSecret=my-postgres-secret \
-            --set auth.secretKeys.adminPasswordKey=auth-password \
-            --set primary.persistence.size=100Mi
+            --set architecture=standalone \
+            --set primary.persistence.size=100Mi \
+            --set fullnameOverride=postgres
 
       - name: Scaffold Services
         run: |
@@ -53,7 +61,8 @@ jobs:
             services+=("$(basename "${dir}")")
           done
           app_names="$(IFS=','; echo "${services[*]}")"
-          PLATFORM_APPS="prometheus,postgres" MOCK_APP_NAMES="${mock_names}" ARGO_APP_NAMES="postgres,${app_names},prometheus" ./scripts/dev-deploy.sh
+          PLATFORM_APPS="prometheus,postgres" MOCK_APP_NAMES="${mock_names}" ARGO_APP_NAMES="postgres,${app_names},prometheus" SKIP_VERIFY=true ./scripts/dev-deploy.sh
 
-      - name: Verify Ecosystem Health
-        run: MOCK_APP_NAMES="external-api-mock" ./scripts/verify.sh
+      - name: Verify Mocks and Services
+        run: |
+          PLATFORM_APPS="prometheus,postgres" MOCK_APP_NAMES="external-api-mock" ./scripts/verify.sh

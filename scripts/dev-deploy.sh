@@ -236,13 +236,8 @@ while ! curl -fsS http://127.0.0.1:8081/index.yaml >/dev/null 2>&1; do
 done
 
 
-echo "INFO: Registering ArgoCD applications..."
-for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
-  manifest="${REPO_ROOT}/platform/gitops/${app_name}.yaml"
-  if [[ -f "${manifest}" ]]; then
-    kubectl apply -f "${manifest}" >/dev/null
-  fi
-done
+echo "INFO: Registering ArgoCD applications and secrets..."
+kubectl apply -f "${REPO_ROOT}/platform/gitops/" >/dev/null
 
 for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
   if ! kubectl -n "${ARGO_APP_NAMESPACE}" get application "${app_name}" >/dev/null 2>&1; then

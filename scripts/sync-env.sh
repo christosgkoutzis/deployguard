@@ -16,7 +16,7 @@ fi
 
 echo "INFO: Syncing Environment from $YAML_FILE..."
 
-# Συνάρτηση για ασφαλή ανάγνωση λιστών από το YAML
+
 parse_list() {
   local query="$1"
   local result
@@ -31,7 +31,7 @@ parse_list() {
 SERVICES=$(parse_list '.services | join(",")')
 MOCKS=$(parse_list '.mocks | join(",")')
 PLATFORM=$(parse_list '.platform_apps | join(",")')
-DEPS=$(parse_list '.dependencies[*].name | join(",")')
+DEPS=$(parse_list '[.dependencies[].name] | join(",")')
 
 # 1. Scaffold Services
 echo "INFO: === Scaffolding Services ==="

@@ -1,0 +1,27 @@
+name: deployguard-local-env
+
+platform_apps:
+  - prometheus
+
+dependencies:
+  - name: postgres
+    repo: https://charts.bitnami.com/bitnami
+    chart: postgresql
+    version: "" 
+    secret: 
+      name: my-postgres-secret
+      key_values:
+        - "postgres-password=secretpassword"
+    set:
+      - "global.postgresql.auth.existingSecret=my-postgres-secret"
+      - "auth.existingSecret=my-postgres-secret"
+      - "architecture=standalone"
+      - "primary.persistence.size=100Mi"
+      - "fullnameOverride=postgres"
+
+mocks:
+  - external-api-mock
+
+services:
+  - python-backend
+  - ruby-gateway

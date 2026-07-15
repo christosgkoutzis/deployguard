@@ -37,11 +37,22 @@ install_helm() {
     curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 }
 
+install_yq() {
+    if is_installed "yq"; then
+        echo "INFO: yq is already installed."
+        return
+    fi
+    echo "INFO: Installing yq..."
+    curl -L "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" -o /usr/local/bin/yq
+    sudo chmod +x /usr/local/bin/yq
+}
+
 # Install dependencies
 install_dependencies() {
     install_kubectl
     install_k3d
     install_helm
+    install_yq
 }
 install_dependencies
 

@@ -13,8 +13,7 @@ This guide bootstraps DeployGuard from scratch, scaffolds service deployment ass
 ```bash
 ./scripts/setup.sh
 ```
-
-Installs missing tools (`kubectl`, `k3d`, `helm`) and creates the local k3d cluster.
+Installs missing tools (`kubectl`, `k3d`, `helm`, `yq`) and creates the local k3d cluster.
 
 ## 2) Bootstrap Platform
 
@@ -24,54 +23,68 @@ Installs missing tools (`kubectl`, `k3d`, `helm`) and creates the local k3d clus
 
 Creates namespaces and installs ArgoCD. Also registers the Prometheus ArgoCD app.
 
-## 3) Scaffold Services & Dependencies
+## 3) Define Environment Topology (Declarative)
 
-DeployGuard supports generic third-party dependencies securely via Kubernetes Secrets and Helm hooks. 
+DeployGuard uses a declarative `deployguard.yaml` file to define the exact state of your local cluster. Instead of manually running scaffolding scripts, you define your required services, dependencies, and mocks in one place.
 
-First, add an external dependency (e.g., PostgreSQL) with auto-generated secrets:
-```bash
-    ./scripts/add-dependency.sh postgres \
-      --repo https://charts.bitnami.com/bitnami \
-      --chart postgresql \
-      --version 15.1.0 \
-      --secret my-postgres-secret postgres-password=secretpassword \
-      --set global.postgresql.auth.existingSecret=my-postgres-secret \
-      --set auth.existingSecret=my-postgres-secret \
-      --set architecture=standalone \
-      --set primary.persistence.size=100Mi \
-      --set fullnameOverride=postgres
+Create a `deployguard.yaml` file in the root of the project:
+
+```yaml
+name: deployguard-local-env
+
+platform_apps:
+  - prometheus
+
+dependencies:
+  - name: postgres
+    repo: [https://charts.bitnami.com/bitnami](https://charts.bitnami.com/bitnami)
+    chart: postgresql
+    version: "" # Leave empty to auto-resolve the latest stable version
+    secret: 
+      name: my-postgres-secret
+      key_values:
+        - "postgres-password=secretpassword"
+    set:
+      - "global.postgresql.auth.existingSecret=my-postgres-secret"
+      - "auth.existingSecret=my-postgres-secret"
+      - "architecture=standalone"
+      - "primary.persistence.size=100Mi"
+      - "fullnameOverride=postgres"
+
+mocks:
+  - external-api-mock
+
+services:
+  - python-backend
+  - ruby-gateway
 ```
 
-Then, generate chart + ArgoCD app for each internal service:
-```bash
-./scripts/add-service.sh python-backend
-./scripts/add-service.sh ruby-gateway
-```
-
-### Customizing Scaffold Outputs & Init Jobs
-If your service requires database migrations, custom ports, or storage, create a `service.contract.env` file in the service directory **before** running `add-service.sh`. 
-
-Example `app/python-backend/service.contract.env` defining a pre-install schema migration Hook:
+### Customizing Init Jobs
+If your microservice requires database migrations, create a `service.contract.env` file in the service directory (e.g., `app/python-backend/service.contract.env`) before syncing:
 ```env
 INIT_COMMAND="python migrate.py"
 ```
 
-## 4) Build, Import, Sync, and Wait
+## 4) Sync Environment
+
+Apply your topology with a single command:
 
 ```bash
-./scripts/dev-deploy.sh
+./scripts/sync-env.sh
 ```
-Builds service images, imports them into k3d, automatically registers the ArgoCD apps, triggers the sync, and waits for health.
+
+This Orchestrator script will automatically parse your YAML, scaffold everything, build the necessary Docker images, and trigger a strict GitOps deployment via ArgoCD.
 
 ## 5) Run Verification
 
+Because the environment is now fully dynamic, run the verification script by sourcing the topology output variables generated during the sync:
+
 ```bash
-./scripts/verify.sh
+source .sync-env.env
+PLATFORM_APPS="${PLATFORM_APPS_COMBINED}" MOCK_APP_NAMES="${MOCKS}" VERIFY_PROM_EXPECTED_JOBS="${SERVICES},prometheus" ./scripts/verify.sh
 ```
 
-Checks rollout, health endpoint, metrics endpoint, and Prometheus scraping.
-
-*Note: The verification checks are strict. If any endpoint is unreachable or a metric format is missing, the script will halt immediately and explicitly print the failing service and endpoint.*
+Checks rollout, health endpoint, metrics endpoint, and Prometheus scraping specifically for the apps defined in your topology.x`
 
 ## 6) Validate Service-to-Service Communication
 
@@ -99,8 +112,8 @@ Open **[http://prometheus.127.0.0.1.nip.io:8080](http://prometheus.127.0.0.1.nip
 
 ## Acceptance Criteria
 
-1. `./scripts/dev-deploy.sh` completes without sync/health failures.
-2. `./scripts/verify.sh` passes.
+1. `./scripts/sync-env.sh` completes without sync/health failures.
+2. `./scripts/verify.sh` passes (using the topology env variables).
 3. Ruby gateway returns content that includes Python backend response.
 4. Prometheus shows both service jobs as healthy targets.
 5. ArgoCD shows both service apps as Synced and Healthy.
@@ -113,7 +126,7 @@ Generated charts and generated ArgoCD app YAMLs are intentionally ignored by git
 
 Because the generated Helm charts are `.gitignore`d, the ArgoCD application cannot pull them from the remote GitHub repository. To maintain the template-first approach without breaking GitOps:
 
-1. `dev-deploy.sh` packages the locally generated charts and serves them via a lightweight, ephemeral `nginx` container on port `8081`.
+1. `sync-env.sh` (via `dev-deploy.sh` under the hood) packages the locally generated charts and serves them via a lightweight, ephemeral `nginx` container on port `8081`.
 2. The generated ArgoCD apps point to `http://host.k3d.internal:8081`, allowing the k3d cluster to fetch the local charts dynamically.
 3. Scripts are built to fail-fast and auto-cleanup if a scaffold step fails, ensuring no partial or corrupted states.
 
@@ -121,4 +134,4 @@ Because the generated Helm charts are `.gitignore`d, the ArgoCD application cann
 
 This repository includes a GitHub Actions workflow (`.github/workflows/cluster-integration.yml`). On every push to the master branch or pull request, it runs a full **End-to-End Cluster Validation**. 
 
-It dynamically spins up an ephemeral k3d cluster, bootstraps ArgoCD, scaffolds the sample services, and runs the entire `dev-deploy` and `verify` flow. This ensures no change breaks the local GitOps pipeline.
+It dynamically spins up an ephemeral k3d cluster, bootstraps ArgoCD, applies the `deployguard.yaml` topology, and runs the entire `sync-env` and `verify` flow.

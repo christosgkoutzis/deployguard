@@ -1,68 +1,31 @@
-name: End-to-End Integration
+name: End-to-End Cluster Validation
 
 on:
   push:
-    branches: ["master"]
+    branches: [ master ]
   pull_request:
-    branches: ["master"]
+    branches: [ master ]
 
 jobs:
-  cluster-validation:
-    name: Cluster Validation
+  build-and-verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Bash Syntax Check
-        run: |
-          echo "INFO: Checking bash syntax for all scripts..."
-          for script in scripts/*.sh; do
-            bash -n "$script"
-          done
+      - name: Setup Tools and Local Cluster
+        run: ./scripts/setup.sh
 
-      - name: Install k3d
-        run: |
-          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+      - name: Bootstrap Platform
+        run: ./scripts/bootstrap-platform.sh
 
-      - name: Bootstrap Cluster & ArgoCD
-        run: |
-          ./scripts/setup.sh
-          ./scripts/bootstrap-platform.sh
+      - name: Sync Declarative Environment
+        run: ./scripts/sync-env.sh
 
-      - name: Scaffold Dependencies
+      - name: Verify Environment Health
         run: |
-          helm repo add bitnami https://charts.bitnami.com/bitnami
-          helm repo update bitnami
-          LATEST_PG_VERSION=$(helm search repo bitnami/postgresql | awk 'NR==2 {print $2}')
-          echo "INFO: Using dynamic PostgreSQL chart version: ${LATEST_PG_VERSION}"
-          
-          ./scripts/add-dependency.sh postgres \
-            --repo https://charts.bitnami.com/bitnami \
-            --chart postgresql \
-            --version "${LATEST_PG_VERSION}" \
-            --secret my-postgres-secret postgres-password=secretpassword \
-            --set global.postgresql.auth.existingSecret=my-postgres-secret \
-            --set auth.existingSecret=my-postgres-secret \
-            --set architecture=standalone \
-            --set primary.persistence.size=100Mi \
-            --set fullnameOverride=postgres
-
-      - name: Scaffold Services
-        run: |
-          for dir in app/*/; do
-            ./scripts/add-service.sh "$(basename "${dir}")"
-          done
-
-      - name: Build and Deploy (Local GitOps)
-        run: |
-          services=()
-          for dir in app/*/; do
-            services+=("$(basename "${dir}")")
-          done
-          app_names="$(IFS=','; echo "${services[*]}")"
-          PLATFORM_APPS="prometheus,postgres" MOCK_APP_NAMES="${mock_names}" ARGO_APP_NAMES="postgres,${app_names},prometheus" SKIP_VERIFY=true ./scripts/dev-deploy.sh
-
-      - name: Verify Mocks and Services
-        run: |
-          PLATFORM_APPS="prometheus,postgres" MOCK_APP_NAMES="external-api-mock" ./scripts/verify.sh
+          source .sync-env.env
+          PLATFORM_APPS="${PLATFORM_APPS_COMBINED}" \
+          MOCK_APP_NAMES="${MOCKS}" \
+          VERIFY_PROM_EXPECTED_JOBS="${SERVICES},prometheus" \
+          ./scripts/verify.sh

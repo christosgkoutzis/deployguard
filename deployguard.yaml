@@ -23,5 +23,9 @@ mocks:
   - external-api-mock
 
 services:
-  - python-backend
-  - ruby-gateway
+  - name: python-backend
+    env:
+      - INIT_COMMAND="python migrate.py"
+  - name: ruby-gateway
+    env:
+      - BACKEND_URL="http://python-backend-service:80"

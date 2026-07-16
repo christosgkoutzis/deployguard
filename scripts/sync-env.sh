@@ -16,7 +16,7 @@ fi
 
 echo "INFO: Syncing Environment from $YAML_FILE..."
 
-
+# Function to safely read lists from YAML
 parse_list() {
   local query="$1"
   local result
@@ -28,14 +28,14 @@ parse_list() {
   fi
 }
 
-SERVICES=$(parse_list '.services | join(",")')
+SERVICES=$(parse_list '[.services[].name] | join(",")')
 MOCKS=$(parse_list '.mocks | join(",")')
 PLATFORM=$(parse_list '.platform_apps | join(",")')
 DEPS=$(parse_list '[.dependencies[].name] | join(",")')
 
 # 1. Scaffold Services
 echo "INFO: === Scaffolding Services ==="
-for svc in $(parse_list '.services[]'); do
+for svc in $(parse_list '.services[].name'); do
   "${REPO_ROOT}/scripts/add-service.sh" "$svc"
 done
 

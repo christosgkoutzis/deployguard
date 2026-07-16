@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Usage: ./scripts/dev-deploy.sh
-# Optional: IMAGE_TAG=v2 ARGO_APP_NAMES=ruby-gateway,python-backend,prometheus SKIP_VERIFY=true ./scripts/dev-deploy.sh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
@@ -10,7 +9,6 @@ ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
 ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,sql-database,prometheus}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-300}"
 SKIP_VERIFY="${SKIP_VERIFY:-false}"
-# Platform apps that have no app/ directory to build from
 PLATFORM_APPS="${PLATFORM_APPS:-prometheus}"
 
 for cmd in docker k3d kubectl; do
@@ -38,7 +36,6 @@ fi
 IFS=',' read -r -a ARGO_APPS <<< "${ARGO_APP_NAMES}"
 IFS=',' read -r -a PLATFORM_APPS_LIST <<< "${PLATFORM_APPS}"
 
-# Sanitize apps and helper function for platform check
 declare -a SANITIZED_APPS=()
 for app in "${ARGO_APPS[@]}"; do
   app_name="${app// /}"
@@ -63,7 +60,6 @@ is_platform_app() {
   return 1
 }
 
-# Generate Helm charts and GitOps manifests for Mock services dynamically
 for mock_name in "${MOCK_APPS_LIST[@]}"; do
   MOCK_DIR="${REPO_ROOT}/platform/mocks/${mock_name}"
   if [[ ! -d "${MOCK_DIR}" ]]; then
@@ -187,10 +183,8 @@ spec:
 EOF
 done
 
-# Initialize array to collect images for batch import
 declare -a IMAGES_TO_IMPORT=()
 
-# Build and import images for all service apps (excluding platform apps)
 for app_name in "${SANITIZED_APPS[@]}"; do
   is_platform_app "${app_name}" && continue
 
@@ -200,8 +194,8 @@ for app_name in "${SANITIZED_APPS[@]}"; do
     exit 1
   fi
 
-  if [[ ! -d "${REPO_ROOT}/platform/charts/${app_name}" ]]; then
-    echo "ERROR: Missing generated chart for ${app_name}. Did you run add-service.sh?"
+  if [[ ! -f "${REPO_ROOT}/platform/gitops/${app_name}.yaml" ]]; then
+    echo "ERROR: Missing GitOps manifest for ${app_name}. Did you run add-service.sh?"
     exit 1
   fi
 
@@ -216,11 +210,16 @@ if [[ ${#IMAGES_TO_IMPORT[@]} -gt 0 ]]; then
 fi
 
 echo "INFO: Packaging Helm charts for local distribution..."
-for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
-  if [[ -d "${REPO_ROOT}/platform/charts/${app_name}" ]]; then
-    helm package "${REPO_ROOT}/platform/charts/${app_name}" -d "${REPO_ROOT}/platform/charts" >/dev/null
+for mock_name in "${MOCK_APPS_LIST[@]}"; do
+  if [[ -d "${REPO_ROOT}/platform/charts/${mock_name}" ]]; then
+    helm package "${REPO_ROOT}/platform/charts/${mock_name}" -d "${REPO_ROOT}/platform/charts" >/dev/null
   fi
 done
+
+if [[ -d "${REPO_ROOT}/platform/universal-chart" ]]; then
+  helm package "${REPO_ROOT}/platform/universal-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
+fi
+
 helm repo index "${REPO_ROOT}/platform/charts"
 
 echo "INFO: Starting local Helm repository server..."
@@ -234,7 +233,6 @@ while ! curl -fsS http://127.0.0.1:8081/index.yaml >/dev/null 2>&1; do
   wait_time=$((wait_time + 1))
   if [[ ${wait_time} -ge 15 ]]; then echo "ERROR: Helm server failed to start in time"; exit 1; fi
 done
-
 
 echo "INFO: Registering ArgoCD applications and secrets..."
 kubectl apply -f "${REPO_ROOT}/platform/gitops/" >/dev/null
@@ -276,7 +274,8 @@ if [[ "${SKIP_VERIFY}" == "true" ]]; then
   echo "INFO: SKIP_VERIFY=true, skipping verification"
 else
   echo "INFO: Running verification"
-VERIFY_RELEASE_NAMES="${VERIFY_RELEASE_NAMES:-}"
+  # ... verification logic remains the same ...
+  VERIFY_RELEASE_NAMES="${VERIFY_RELEASE_NAMES:-}"
   if [[ -z "${VERIFY_RELEASE_NAMES// }" ]]; then
     release_list=()
     for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do

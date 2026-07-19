@@ -25,6 +25,7 @@ spec:
       - name: {{ .Release.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: Never
+        {{- if eq (default "webservice" .Values.workloadType) "webservice" }}
         ports:
         - containerPort: {{ .Values.service.targetPort }}
         readinessProbe:
@@ -32,6 +33,7 @@ spec:
             path: {{ .Values.health.path }}
             port: {{ .Values.service.targetPort }}
           initialDelaySeconds: 5
+        {{- end }}
         {{- if .Values.env }}
         env:
         {{- range $key, $val := .Values.env }}

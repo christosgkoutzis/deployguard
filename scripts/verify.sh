@@ -104,6 +104,12 @@ for release in "${RELEASE_LIST[@]}"; do
   kubectl -n "${NAMESPACE}" rollout status "${workload_type}/${workload_name}" --timeout=120s
 
 app_url="http://${release_name}.127.0.0.1.nip.io:8080"
+
+has_ingress=$(kubectl -n "${NAMESPACE}" get ingress "${release_name}-ingress" --ignore-not-found 2>/dev/null || true)
+  if [[ -z "${has_ingress}" ]]; then
+    echo "INFO: Archetype is 'worker'. Skipping HTTP checks for ${release_name}."
+    continue
+  fi
   
   echo "INFO: Waiting for Ingress routing to become active for ${release_name}"
   wait_time=0
@@ -161,6 +167,9 @@ if [[ "${VERIFY_MONITORING}" == "true" ]]; then
         for job in "${PROM_JOB_LIST[@]}"; do
               job_name="${job// /}"
               if [[ -z "${job_name}" ]]; then continue; fi
+              if ! kubectl -n "${NAMESPACE}" get svc "${job_name}-service" >/dev/null 2>&1; then
+                continue
+              fi
               
               is_mock_job="false"
               if [[ -n "${MOCK_APP_NAMES:-}" ]]; then

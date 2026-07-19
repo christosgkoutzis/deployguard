@@ -61,8 +61,14 @@ get '/read' do
   uri = URI("#{BACKEND_URL}/db/read")
   response = Net::HTTP.get_response(uri)
   data = JSON.parse(response.body)
-  msg = data['greeting'] || data['error'] || 'No greetings yet'
-  redirect "/?db_message=Message from SQL database: #{msg}"
+  
+  if data['error']
+    msg = data['error']
+  else
+    msg = "#{data['greeting']} | Status: [#{data['status']}] | Created: #{data['created_at']}"
+  end
+  
+  redirect "/?db_message=#{URI.encode_www_form_component(msg)}"
 end
 
 helpers do

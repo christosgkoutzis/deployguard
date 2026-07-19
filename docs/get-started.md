@@ -63,6 +63,10 @@ services:
     env:
       - BACKEND_URL="http://python-backend-service:80"
 ```
+### Workload Archetypes
+DeployGuard natively supports different architectural patterns via the `type` field in your `deployguard.yaml`:
+* `webservice` (Default): Creates a Deployment, an internal Service, an Ingress route, and enforces HTTP readiness probes.
+* `worker`: Creates only a Deployment. Ideal for background processors, queue consumers, or async tasks that do not expose web ports.
 
 ### Customizing Environment Variables & Init Jobs
 DeployGuard supports a flexible, hybrid approach for injecting configuration into your services:

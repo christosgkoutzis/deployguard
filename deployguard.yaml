@@ -29,3 +29,5 @@ services:
   - name: ruby-gateway
     env:
       - BACKEND_URL="http://python-backend-service:80"
+  - name: python-worker
+    type: worker

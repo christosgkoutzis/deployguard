@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/api/validate"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "result": "Approved"
+    }
+  }
+}

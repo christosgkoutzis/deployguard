@@ -55,7 +55,13 @@ def read_db():
         db = SessionLocal()
         latest = db.query(Greeting).order_by(Greeting.id.desc()).first()
         db.close()
-        return {"greeting": latest.greeting if latest else None}
+        if latest:
+            return {
+                "greeting": latest.greeting,
+                "status": latest.status,
+                "created_at": latest.created_at.strftime("%Y-%m-%d %H:%M:%S") if latest.created_at else None
+            }
+        return {"error": "No greetings yet"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -63,7 +69,7 @@ def read_db():
 def write_db():
     try:
         db = SessionLocal()
-        new_greeting = Greeting(greeting="Hello from Native PostgreSQL via Python Init Job!")
+        new_greeting = Greeting(greeting="Awaiting validation from Worker")
         db.add(new_greeting)
         db.commit()
         db.close()

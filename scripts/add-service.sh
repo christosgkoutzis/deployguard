@@ -52,9 +52,12 @@ fi
 
 INIT_COMMAND="${ENV_VARS[INIT_COMMAND]:-}"
 unset ENV_VARS[INIT_COMMAND] # Remove from standard env list so it's not injected into the app container
+WORKLOAD_TYPE=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .type" "$REPO_ROOT/deployguard.yaml" 2>/dev/null | grep -v "null" || true)
+WORKLOAD_TYPE="${WORKLOAD_TYPE:-webservice}"
 
 # 2. Build the Values block for the Universal Chart
-VALUES_YAML="image:
+VALUES_YAML="workloadType: ${WORKLOAD_TYPE}
+image:
   repository: ${IMAGE_REPO}
   tag: ${IMAGE_TAG}
 service:

@@ -1,6 +1,7 @@
 import os
 import time
-from sqlalchemy import create_engine, Column, Integer, String
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base
 
 DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
@@ -11,6 +12,8 @@ class Greeting(Base):
     __tablename__ = "greetings"
     id = Column(Integer, primary_key=True, index=True)
     greeting = Column(String, index=True)
+    status = Column(String, default="Pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 def migrate():
     retries = 15

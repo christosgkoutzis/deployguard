@@ -6,11 +6,21 @@ from fastapi import FastAPI, Request, Response
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from migrate import Greeting  # Import from our generic migrate script
+from migrate import Greeting
+from confluent_kafka import Producer
+import json
 
 APP_NAME = os.getenv("APP_NAME", "python-backend")
 DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL", "http://external-api-mock-service:80")
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+
+kafka_producer = None
+def get_producer():
+    global kafka_producer
+    if not kafka_producer:
+        kafka_producer = Producer({'bootstrap.servers': KAFKA_BROKER})
+    return kafka_producer
 
 app = FastAPI(title=APP_NAME)
 engine = create_engine(DB_URL)
@@ -72,7 +82,15 @@ def write_db():
         new_greeting = Greeting(greeting="Awaiting validation from Worker")
         db.add(new_greeting)
         db.commit()
+        db.refresh(new_greeting)
+        greeting_id = new_greeting.id
         db.close()
+
+        p = get_producer()
+        payload = json.dumps({'greeting_id': greeting_id}).encode('utf-8')
+        p.produce('pending-greetings', value=payload)
+        p.flush()
+        
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}

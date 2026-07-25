@@ -1,13 +1,14 @@
 import os
 import time
 import requests
+import json
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.exc import OperationalError
+from confluent_kafka import Consumer, KafkaException
 
 DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
 VALIDATE_URL = os.getenv("VALIDATE_URL", "http://external-api-mock-service:80/api/validate")
-
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 engine = create_engine(DB_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -35,37 +36,60 @@ def wait_for_db():
     exit(1)
 
 def run_worker():
-    print("INFO: Validation Worker starting...")
-    
-    # Wait for PostgreSQL to be ready before starting the work loop
+    print("INFO: Worker starting...")
     wait_for_db()
     
-    print("INFO: Worker is now polling for pending greetings.")
+    conf = {
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': 'validation-group',
+        'auto.offset.reset': 'earliest'
+    }
+    
+    print("INFO: Connecting to Kafka...")
+    consumer = Consumer(conf)
+    
     while True:
         try:
-            db = SessionLocal()
-            # This will naturally fail if the python-backend init-job hasn't created the table yet.
-            # It is caught silently below, and the worker will retry on the next tick.
-            pending = db.query(Greeting).filter(Greeting.status == "Pending").first()
+            consumer.subscribe(['pending-greetings'])
+            print("INFO: Subscribed to topic.")
+            break
+        except KafkaException as e:
+            print(f"WARN: Topic not ready yet, retrying... {e}")
+            time.sleep(5)
+
+    print("INFO: Listening for events...")
+    try:
+        while True:
+            msg = consumer.poll(timeout=1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"WARN: Consumer error: {msg.error()}")
+                continue
             
-            if pending:
-                print(f"INFO: Validating greeting ID: {pending.id}...")
-                r = requests.post(VALIDATE_URL, timeout=5)
+            try:
+                data = json.loads(msg.value().decode('utf-8'))
+                greeting_id = data.get('greeting_id')
                 
-                if r.status_code == 200:
-                    result = r.json().get("result", "Approved")
-                    pending.status = result
-                    db.commit()
-                    print(f"INFO: Greeting ID {pending.id} updated to {result}.")
-                else:
-                    print(f"WARN: Mock Validation API returned status {r.status_code}.")
-            db.close()
-        except Exception:
-            # Silently handle database unavailability during schema migrations
-            pass
-            
-        # Polling interval to prevent CPU exhaustion
-        time.sleep(5)
+                if greeting_id:
+                    print(f"INFO: Processing greeting ID: {greeting_id}")
+                    db = SessionLocal()
+                    pending = db.query(Greeting).filter(Greeting.id == greeting_id).first()
+                    
+                    if pending and pending.status == "Pending":
+                        r = requests.post(VALIDATE_URL, timeout=5)
+                        result = r.json().get("result", "Approved") if r.status_code == 200 else "Error"
+                        
+                        pending.status = result
+                        db.commit()
+                        print(f"INFO: Greeting {greeting_id} set to {result}.")
+                    db.close()
+            except Exception as e:
+                print(f"ERROR: Processing failed: {e}")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        consumer.close()
 
 if __name__ == "__main__":
     run_worker()

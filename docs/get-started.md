@@ -38,9 +38,9 @@ platform_apps:
 
 dependencies:
   - name: postgres
-    repo: [https://charts.bitnami.com/bitnami](https://charts.bitnami.com/bitnami)
+    repo: https://charts.bitnami.com/bitnami
     chart: postgresql
-    version: "" # Leave empty to auto-resolve the latest stable version
+    version: ""
     secret: 
       name: my-postgres-secret
       key_values:
@@ -51,18 +51,49 @@ dependencies:
       - "architecture=standalone"
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
+  - name: kafka
+    repo: https://charts.bitnami.com/bitnami
+    chart: kafka
+    version: ""
+    set:
+      - "kraft.enabled=true"
+      - "zookeeper.enabled=false"
+      - "replicaCount=1"
+      - "listeners.client.protocol=PLAINTEXT"
+      - "extraEnvVars[0].name=KAFKA_HEAP_OPTS"
+      - "extraEnvVars[0].value=-Xmx256m -Xms256m"
 
 mocks:
   - external-api-mock
 
 services:
   - name: python-backend
+    depends_on:
+      - postgres
+      - kafka
     env:
       - INIT_COMMAND="python migrate.py"
   - name: ruby-gateway
+    depends_on:
+      - python-backend
     env:
       - BACKEND_URL="http://python-backend-service:80"
+  - name: python-worker
+    type: worker
+    depends_on:
+      - postgres
+      - kafka
+      - external-api-mock
 ```
+### Dependency Graph & Event-Driven Architecture
+DeployGuard introduces a `depends_on` field. This allows the orchestrator to build a dependency graph for your microservices. 
+In our example, the system uses an **Event-Driven Architecture**:
+1. **Ruby Gateway** depends on **Python Backend**.
+2. **Python Backend** writes to **PostgreSQL** and publishes events to **Kafka**.
+3. **Python Worker** consumes events from **Kafka**, validates them via the **External API Mock**, and updates **PostgreSQL**.
+
+The included Kafka dependency is a lightweight KRaft-mode emulator with a strict 256MB memory limit, ensuring it runs smoothly on local environments without consuming excessive resources.
+
 ### Workload Archetypes
 DeployGuard natively supports different architectural patterns via the `type` field in your `deployguard.yaml`:
 * `webservice` (Default): Creates a Deployment, an internal Service, an Ingress route, and enforces HTTP readiness probes.
@@ -78,10 +109,17 @@ DeployGuard supports a flexible, hybrid approach for injecting configuration int
 Apply your topology with a single command:
 
 ```bash
+# Deploy the entire environment
 ./scripts/sync-env.sh
+
+# OR: Deploy a focused subset of the environment
+./scripts/sync-env.sh --focus ruby-gateway
 ```
 
 This Orchestrator script will automatically parse your YAML, scaffold everything using the Universal Helm Chart, build the necessary Docker images, and trigger a strict GitOps deployment via ArgoCD.
+
+The --focus Flag:
+By using --focus <service-name>, DeployGuard reads the depends_on graph in your YAML and deploys only the requested service along with its direct dependencies. This dramatically saves local CPU/RAM resources (e.g., focusing on ruby-gateway will skip provisioning Kafka, the mock, and the worker entirely).
 
 ## 5) Run Verification
 
@@ -102,7 +140,11 @@ Open your browser or run:
 ```bash
 curl [http://ruby-gateway.127.0.0.1.nip.io:8080/](http://ruby-gateway.127.0.0.1.nip.io:8080/)
 ```
-Expected behavior: Ruby page includes a message fetched from Python backend and the Mock API.
+Expected behavior: 
+1. Ruby page includes a message fetched from the Python backend and the Mock API.
+2. Writing a greeting via the UI triggers a POST to the Python backend.
+3. The Python backend writes to PostgreSQL and publishes an event to Kafka.
+4. The Python Worker consumes the Kafka event, validates via the Mock API, and updates the database.
 
 Optional direct Python check:
 ```bash

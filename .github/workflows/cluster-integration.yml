@@ -19,13 +19,75 @@ jobs:
       - name: Bootstrap Platform
         run: ./scripts/bootstrap-platform.sh
 
-      - name: Sync Declarative Environment
-        run: ./scripts/sync-env.sh
+      - name: Sync Focused Environment
+        run: ./scripts/sync-env.sh --focus ruby-gateway
 
-      - name: Verify Environment Health
+      - name: Verify Focused Environment
         run: |
           source .sync-env.env
           PLATFORM_APPS="${PLATFORM_APPS_COMBINED}" \
           MOCK_APP_NAMES="${MOCKS}" \
           VERIFY_PROM_EXPECTED_JOBS="${SERVICES},prometheus" \
           ./scripts/verify.sh
+
+      - name: Sync Full Environment (Deploy all services)
+        run: ./scripts/sync-env.sh
+
+      - name: Verify Full Environment
+        run: |
+          source .sync-env.env
+          PLATFORM_APPS="${PLATFORM_APPS_COMBINED}" \
+          MOCK_APP_NAMES="${MOCKS}" \
+          VERIFY_PROM_EXPECTED_JOBS="${SERVICES},prometheus" \
+          ./scripts/verify.sh
+
+      - name: E2E Functional Validation (Kafka Event-Driven Flow)
+        run: |
+          echo "INFO: Triggering a new greeting write..."
+          curl -s -X POST http://python-backend.127.0.0.1.nip.io:8080/db/write
+          
+          echo "INFO: Polling database state for eventual consistency..."
+          MAX_RETRIES=15
+          RETRY_COUNT=0
+          SUCCESS=false
+          
+          while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+            RESULT=$(curl -s http://python-backend.127.0.0.1.nip.io:8080/db/read)
+            echo "Attempt $((RETRY_COUNT + 1)) - DB State: $RESULT"
+            
+            if [[ "$RESULT" == *"Approved"* ]]; then
+              SUCCESS=true
+              echo "SUCCESS: Event processed and approved!"
+              break
+            fi
+            
+            sleep 2
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+          done
+          
+          if [[ "$SUCCESS" == "false" ]]; then
+            echo "ERROR: Event-driven workflow timed out! Expected 'Approved' in status."
+            exit 1
+          fi
+
+      - name: Debug Cluster State On Failure
+        if: ${{ failure() }}
+        run: |
+          echo "INFO: Debugging ArgoCD applications..."
+          kubectl -n argocd get applications || true
+          kubectl -n argocd get application kafka -o yaml || true
+
+          echo "INFO: Debugging Kafka pods..."
+          kubectl -n deployguard get pods -l app.kubernetes.io/instance=kafka -o wide || true
+
+          POD_NAME=$(kubectl -n deployguard get pods -l app.kubernetes.io/instance=kafka -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          if [[ -n "${POD_NAME}" ]]; then
+            echo "INFO: Describing Kafka pod ${POD_NAME}"
+            kubectl -n deployguard describe pod "${POD_NAME}" || true
+          fi
+
+          echo "INFO: Kafka statefulset logs..."
+          kubectl -n deployguard logs statefulset/kafka-controller --all-containers=true --tail=200 || true
+
+          echo "INFO: Recent deployguard events..."
+          kubectl -n deployguard get events --sort-by=.lastTimestamp | tail -n 120 || true

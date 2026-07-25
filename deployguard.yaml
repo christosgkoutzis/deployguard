@@ -18,16 +18,39 @@ dependencies:
       - "architecture=standalone"
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
-
+  - name: kafka
+    repo: registry-1.docker.io/bitnamicharts
+    chart: kafka
+    version: "32.4.3"
+    set:
+      - "image.registry=docker.io"
+      - "image.repository=confluentinc/cp-kafka"
+      - "image.tag=7.5.0"
+      - "controller.replicaCount=1"
+      - "controller.persistence.enabled=false"
+      - "listeners.client.protocol=PLAINTEXT"
+      - "listeners.controller.protocol=PLAINTEXT"
+      - "listeners.interbroker.protocol=PLAINTEXT"
+      - "controller.heapOpts=-Xmx256m -Xms256m"
+      - "fullnameOverride=kafka"
 mocks:
   - external-api-mock
 
 services:
   - name: python-backend
+    depends_on:
+      - postgres
+      - kafka
     env:
       - INIT_COMMAND="python migrate.py"
   - name: ruby-gateway
+    depends_on:
+      - python-backend
     env:
       - BACKEND_URL="http://python-backend-service:80"
   - name: python-worker
     type: worker
+    depends_on:
+      - postgres
+      - kafka
+      - external-api-mock

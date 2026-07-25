@@ -4,6 +4,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 YAML_FILE="${REPO_ROOT}/deployguard.yaml"
 
+FOCUS_SERVICE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --focus) FOCUS_SERVICE="$2"; shift 2 ;;
+    *) echo "ERROR: Unknown argument '$1'"; exit 1 ;;
+  esac
+done
+
 if [[ ! -f "$YAML_FILE" ]]; then
   echo "ERROR: Environment file $YAML_FILE not found!"
   exit 1
@@ -33,59 +41,125 @@ MOCKS=$(parse_list '.mocks | join(",")')
 PLATFORM=$(parse_list '.platform_apps | join(",")')
 DEPS=$(parse_list '[.dependencies[].name] | join(",")')
 
+# Apply Focus Graph Resolution (Full Recursive Tree)
+if [[ -n "$FOCUS_SERVICE" ]]; then
+  echo "INFO: Focus mode active. Resolving dependency tree for: $FOCUS_SERVICE"
+  if ! echo "$SERVICES" | tr ',' '\n' | grep -qw "$FOCUS_SERVICE"; then
+    echo "ERROR: Service '$FOCUS_SERVICE' not found in deployguard.yaml"
+    exit 1
+  fi
+
+  RESOLVED_DEPS="$FOCUS_SERVICE"
+  QUEUE="$FOCUS_SERVICE"
+  
+  # Recursively find all dependencies (services, platform apps, mocks)
+  while [[ -n "$QUEUE" ]]; do
+    CURRENT=$(echo "$QUEUE" | cut -d',' -f1)
+    
+    # Remove processed item from queue
+    if [[ "$QUEUE" == *","* ]]; then
+      QUEUE=$(echo "$QUEUE" | cut -d',' -f2-)
+    else
+      QUEUE=""
+    fi
+    
+    CUR_DEPS=$(yq ".services[] | select(.name == \"$CURRENT\") | .depends_on | join(\",\")" "$YAML_FILE" 2>/dev/null || echo "")
+    
+    for d in $(echo "$CUR_DEPS" | tr ',' '\n'); do
+      if [[ -n "$d" ]] && ! echo "$RESOLVED_DEPS" | tr ',' '\n' | grep -qw "$d"; then
+        RESOLVED_DEPS="${RESOLVED_DEPS},${d}"
+        if [[ -n "$QUEUE" ]]; then QUEUE="${QUEUE},${d}"; else QUEUE="${d}"; fi
+      fi
+    done
+  done
+
+  # Filter the original declarative lists based on the resolved tree
+  FILTERED_SERVICES=""
+  for s in $(echo "$SERVICES" | tr ',' '\n'); do
+    if echo "$RESOLVED_DEPS" | tr ',' '\n' | grep -qw "$s"; then FILTERED_SERVICES="${FILTERED_SERVICES}${s},"; fi
+  done
+  SERVICES=$(echo "${FILTERED_SERVICES}" | sed 's/,$//')
+
+  FILTERED_DEPS=""
+  for d in $(echo "$DEPS" | tr ',' '\n'); do
+    if echo "$RESOLVED_DEPS" | tr ',' '\n' | grep -qw "$d"; then FILTERED_DEPS="${FILTERED_DEPS}${d},"; fi
+  done
+  DEPS=$(echo "${FILTERED_DEPS}" | sed 's/,$//')
+
+  FILTERED_MOCKS=""
+  for m in $(echo "$MOCKS" | tr ',' '\n'); do
+    if echo "$RESOLVED_DEPS" | tr ',' '\n' | grep -qw "$m"; then FILTERED_MOCKS="${FILTERED_MOCKS}${m},"; fi
+  done
+  MOCKS=$(echo "${FILTERED_MOCKS}" | sed 's/,$//')
+fi
+
+# 0. Clean stale local GitOps state
+echo "INFO: === Cleaning up stale GitOps manifests ==="
+find "${REPO_ROOT}/platform/gitops" -type f -name "*.yaml" ! -name "prometheus.yaml" -delete 2>/dev/null || true
+
 # 1. Scaffold Services
 echo "INFO: === Scaffolding Services ==="
-for svc in $(parse_list '.services[].name'); do
-  "${REPO_ROOT}/scripts/add-service.sh" "$svc"
+for svc in $(echo "$SERVICES" | tr ',' '\n'); do
+  if [[ -n "$svc" ]]; then
+    "${REPO_ROOT}/scripts/add-service.sh" "$svc"
+  fi
 done
 
-# 2. Scaffold Dependencies (με Dynamic Resolution)
+# 2. Scaffold Dependencies (Dynamic Resolution)
 echo "INFO: === Scaffolding Dependencies ==="
-DEPS_LEN=$(yq '.dependencies | length' "$YAML_FILE" 2>/dev/null || echo 0)
-if [[ "$DEPS_LEN" =~ ^[0-9]+$ ]] && [[ "$DEPS_LEN" -gt 0 ]]; then
-  for i in $(seq 0 $((DEPS_LEN-1))); do
-    NAME=$(yq ".dependencies[$i].name" "$YAML_FILE")
-    REPO=$(yq ".dependencies[$i].repo" "$YAML_FILE")
-    CHART=$(yq ".dependencies[$i].chart" "$YAML_FILE")
-    VERSION=$(yq ".dependencies[$i].version" "$YAML_FILE")
-
-    # Dynamic Version Resolution if version is null or empty
-    if [[ "$VERSION" == "null" || "$VERSION" == "" ]]; then
-       helm repo add "temp-repo-$NAME" "$REPO" >/dev/null 2>&1 || true
-       helm repo update "temp-repo-$NAME" >/dev/null 2>&1 || true
-       VERSION=$(helm search repo "temp-repo-$NAME/$CHART" | awk 'NR==2 {print $2}')
-       echo "INFO: Resolved dynamic version for $NAME: $VERSION"
-    fi
-
-    CMD=("${REPO_ROOT}/scripts/add-dependency.sh" "$NAME" "--repo" "$REPO" "--chart" "$CHART" "--version" "$VERSION")
-
-    SECRET_NAME=$(yq ".dependencies[$i].secret.name" "$YAML_FILE")
-    if [[ "$SECRET_NAME" != "null" ]]; then
-      KV_LEN=$(yq ".dependencies[$i].secret.key_values | length" "$YAML_FILE")
-      for k in $(seq 0 $((KV_LEN-1))); do
-        KV=$(yq ".dependencies[$i].secret.key_values[$k]" "$YAML_FILE")
-        CMD+=("--secret" "$SECRET_NAME" "$KV")
-      done
-    fi
-
-    SET_LEN=$(yq ".dependencies[$i].set | length" "$YAML_FILE")
-    if [[ "$SET_LEN" -gt 0 && "$SET_LEN" != "null" ]]; then
-      for j in $(seq 0 $((SET_LEN-1))); do
-        SET_VAL=$(yq ".dependencies[$i].set[$j]" "$YAML_FILE")
-        CMD+=("--set" "$SET_VAL")
-      done
-    fi
-
-    "${CMD[@]}"
-  done
-fi
+for dep in $(echo "$DEPS" | tr ',' '\n'); do
+  if [[ -z "$dep" ]]; then continue; fi
+  
+  NAME="$dep"
+  REPO=$(yq ".dependencies[] | select(.name == \"$NAME\") | .repo" "$YAML_FILE")
+  CHART=$(yq ".dependencies[] | select(.name == \"$NAME\") | .chart" "$YAML_FILE")
+  VERSION=$(yq ".dependencies[] | select(.name == \"$NAME\") | .version" "$YAML_FILE")
+  
+  if [[ "$VERSION" == "null" || "$VERSION" == "" ]]; then
+     helm repo add "temp-repo-$NAME" "$REPO" >/dev/null 2>&1 || true
+     helm repo update "temp-repo-$NAME" >/dev/null 2>&1 || true
+     VERSION=$(helm search repo "temp-repo-$NAME/$CHART" | awk 'NR==2 {print $2}')
+     echo "INFO: Resolved dynamic version for $NAME: $VERSION"
+  fi
+  
+  CMD=("${REPO_ROOT}/scripts/add-dependency.sh" "$NAME" "--repo" "$REPO" "--chart" "$CHART" "--version" "$VERSION")
+  
+  SECRET_NAME=$(yq ".dependencies[] | select(.name == \"$NAME\") | .secret.name" "$YAML_FILE")
+  if [[ "$SECRET_NAME" != "null" ]]; then
+    KV_LEN=$(yq ".dependencies[] | select(.name == \"$NAME\") | .secret.key_values | length" "$YAML_FILE")
+    for k in $(seq 0 $((KV_LEN-1))); do
+      KV=$(yq ".dependencies[] | select(.name == \"$NAME\") | .secret.key_values[$k]" "$YAML_FILE")
+      CMD+=("--secret" "$SECRET_NAME" "$KV")
+    done
+  fi
+  
+  SET_LEN=$(yq ".dependencies[] | select(.name == \"$NAME\") | .set | length" "$YAML_FILE")
+  if [[ "$SET_LEN" -gt 0 && "$SET_LEN" != "null" ]]; then
+    for j in $(seq 0 $((SET_LEN-1))); do
+      SET_VAL=$(yq ".dependencies[] | select(.name == \"$NAME\") | .set[$j]" "$YAML_FILE")
+      CMD+=("--set" "$SET_VAL")
+    done
+  fi
+  
+  "${CMD[@]}"
+done
 
 # 3. Trigger Deployment
 echo "INFO: === Triggering Strict GitOps Deployment ==="
 
 # Safely join the variables (remove redundant commas)
-ALL_APPS=$(echo "${DEPS},${SERVICES},${PLATFORM}" | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
+ALL_APPS=$(echo "${DEPS},${SERVICES},${PLATFORM},${MOCKS}" | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
 PLATFORM_APPS_COMBINED=$(echo "${PLATFORM},${DEPS}" | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
+
+# Active Pruning: Delete ArgoCD apps that are no longer in focus to free up RAM
+echo "INFO: === Pruning out-of-focus applications ==="
+EXISTING_APPS=$(kubectl -n argocd get applications -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+for app in $EXISTING_APPS; do
+  if ! echo "$ALL_APPS" | tr ',' '\n' | grep -qw "$app"; then
+    echo "INFO: Deleting out-of-focus application: $app"
+    kubectl -n argocd delete application "$app" --ignore-not-found >/dev/null
+  fi
+done
 
 export PLATFORM_APPS="${PLATFORM_APPS_COMBINED}"
 export MOCK_APP_NAMES="${MOCKS}"

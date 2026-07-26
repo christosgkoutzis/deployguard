@@ -184,9 +184,14 @@ EOF
 done
 
 declare -a IMAGES_TO_IMPORT=()
-
 for app_name in "${SANITIZED_APPS[@]}"; do
   is_platform_app "${app_name}" && continue
+
+  is_mock="false"
+  for m in "${MOCK_APPS_LIST[@]}"; do
+    [[ "${app_name}" == "${m}" ]] && is_mock="true" && break
+  done
+  [[ "${is_mock}" == "true" ]] && continue
 
   app_context="${REPO_ROOT}/app/${app_name}"
   if [[ ! -d "${app_context}" ]]; then

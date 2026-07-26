@@ -19,20 +19,12 @@ dependencies:
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
   - name: kafka
-    repo: registry-1.docker.io/bitnamicharts
-    chart: kafka
-    version: "32.4.3"
+    repo: http://host.k3d.internal:8081
+    chart: confluent-kafka
+    version: "0.1.0"
     set:
-      - "image.registry=docker.io"
-      - "image.repository=confluentinc/cp-kafka"
-      - "image.tag=7.5.0"
-      - "controller.replicaCount=1"
-      - "controller.persistence.enabled=false"
-      - "listeners.client.protocol=PLAINTEXT"
-      - "listeners.controller.protocol=PLAINTEXT"
-      - "listeners.interbroker.protocol=PLAINTEXT"
-      - "controller.heapOpts=-Xmx256m -Xms256m"
-      - "fullnameOverride=kafka"
+      - "image.tag=8.0.6"
+      - "heapOpts=-Xms256m -Xmx256m"
 mocks:
   - external-api-mock
 

@@ -220,6 +220,10 @@ if [[ -d "${REPO_ROOT}/platform/universal-chart" ]]; then
   helm package "${REPO_ROOT}/platform/universal-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
 fi
 
+if [[ -d "${REPO_ROOT}/platform/confluent-kafka-chart" ]]; then
+  helm package "${REPO_ROOT}/platform/confluent-kafka-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
+fi
+
 helm repo index "${REPO_ROOT}/platform/charts"
 
 echo "INFO: Starting local Helm repository server..."

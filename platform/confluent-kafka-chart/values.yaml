@@ -1,0 +1,23 @@
+image:
+  repository: confluentinc/cp-kafka
+  tag: "8.0.6"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  port: 9092
+  controllerPort: 9093
+
+kraft:
+  clusterId: MkU3OEVBNTcwNTJENDM2Qk
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 768Mi
+
+heapOpts: "-Xms256m -Xmx256m"

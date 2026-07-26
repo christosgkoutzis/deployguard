@@ -74,20 +74,20 @@ jobs:
         if: ${{ failure() }}
         run: |
           echo "INFO: Debugging ArgoCD applications..."
-          kubectl -n argocd get applications || true
-          kubectl -n argocd get application kafka -o yaml || true
+          kubectl -n argocd get applications -o wide || true
+          kubectl -n argocd get applications -o yaml || true
 
-          echo "INFO: Debugging Kafka pods..."
-          kubectl -n deployguard get pods -l app.kubernetes.io/instance=kafka -o wide || true
+          echo "INFO: Debugging deployguard workloads..."
+          kubectl -n deployguard get all -o wide || true
+          kubectl -n deployguard get ingress,configmap,secret,pvc || true
 
-          POD_NAME=$(kubectl -n deployguard get pods -l app.kubernetes.io/instance=kafka -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-          if [[ -n "${POD_NAME}" ]]; then
-            echo "INFO: Describing Kafka pod ${POD_NAME}"
-            kubectl -n deployguard describe pod "${POD_NAME}" || true
-          fi
+          echo "INFO: Describing deployguard pods..."
+          kubectl -n deployguard get pods -o name \
+            | xargs -r -I{} kubectl -n deployguard describe {} || true
 
-          echo "INFO: Kafka statefulset logs..."
-          kubectl -n deployguard logs statefulset/kafka-controller --all-containers=true --tail=200 || true
+          echo "INFO: Recent deployguard logs..."
+          kubectl -n deployguard logs --all-containers=true --tail=120 --prefix=true -l app.kubernetes.io/instance=kafka || true
+          kubectl -n deployguard logs --all-containers=true --tail=80 --prefix=true -l app || true
 
           echo "INFO: Recent deployguard events..."
           kubectl -n deployguard get events --sort-by=.lastTimestamp | tail -n 120 || true

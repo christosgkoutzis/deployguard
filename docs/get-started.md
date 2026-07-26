@@ -52,16 +52,12 @@ dependencies:
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
   - name: kafka
-    repo: https://charts.bitnami.com/bitnami
-    chart: kafka
-    version: ""
+    repo: http://host.k3d.internal:8081
+    chart: confluent-kafka
+    version: "0.1.0"
     set:
-      - "kraft.enabled=true"
-      - "zookeeper.enabled=false"
-      - "replicaCount=1"
-      - "listeners.client.protocol=PLAINTEXT"
-      - "extraEnvVars[0].name=KAFKA_HEAP_OPTS"
-      - "extraEnvVars[0].value=-Xmx256m -Xms256m"
+      - "image.tag=8.0.6"
+      - "heapOpts=-Xms256m -Xmx256m"
 
 mocks:
   - external-api-mock
@@ -92,7 +88,7 @@ In our example, the system uses an **Event-Driven Architecture**:
 2. **Python Backend** writes to **PostgreSQL** and publishes events to **Kafka**.
 3. **Python Worker** consumes events from **Kafka**, validates them via the **External API Mock**, and updates **PostgreSQL**.
 
-The included Kafka dependency is a lightweight KRaft-mode emulator with a strict 256MB memory limit, ensuring it runs smoothly on local environments without consuming excessive resources.
+The included Kafka dependency is a lightweight single-node Confluent Kafka KRaft chart for local development. It uses Confluent Platform `8.0.6`, which maps to Apache Kafka 4.0.x. It exposes the standard broker endpoint at `kafka:9092`, uses `emptyDir` storage instead of a PVC, and runs without ZooKeeper. The default heap is 256Mi with conservative CPU and memory requests so the local cluster stays responsive while still exercising the real Kafka protocol used by the services.
 
 ### Workload Archetypes
 DeployGuard natively supports different architectural patterns via the `type` field in your `deployguard.yaml`:
@@ -119,7 +115,7 @@ Apply your topology with a single command:
 This Orchestrator script will automatically parse your YAML, scaffold everything using the Universal Helm Chart, build the necessary Docker images, and trigger a strict GitOps deployment via ArgoCD.
 
 The --focus Flag:
-By using --focus <service-name>, DeployGuard reads the depends_on graph in your YAML and deploys only the requested service along with its direct dependencies. This dramatically saves local CPU/RAM resources (e.g., focusing on ruby-gateway will skip provisioning Kafka, the mock, and the worker entirely).
+By using --focus <service-name>, DeployGuard reads the depends_on graph in your YAML and deploys only the requested service plus its recursive dependencies. This saves local CPU/RAM by skipping unrelated workloads. For example, focusing on `ruby-gateway` still deploys `python-backend`, PostgreSQL, and Kafka because they are required by the dependency graph, but it skips `python-worker` and `external-api-mock`.
 
 ## 5) Run Verification
 
@@ -165,8 +161,8 @@ Open **[http://prometheus.127.0.0.1.nip.io:8080](http://prometheus.127.0.0.1.nip
 1. `./scripts/sync-env.sh` completes without sync/health failures.
 2. `./scripts/verify.sh` passes (using the topology env variables).
 3. Ruby gateway returns content that includes Python backend response.
-4. Prometheus shows both service jobs as healthy targets.
-5. ArgoCD shows both service apps as Synced and Healthy.
+4. Prometheus shows the expected service jobs as healthy targets.
+5. ArgoCD shows the selected application graph as Synced and Healthy.
 
 ## Notes on Generated Files
 
@@ -176,12 +172,20 @@ Generated GitOps app YAMLs are intentionally ignored by git. This keeps the repo
 
 To maintain the template-first approach without breaking GitOps:
 
-1. `sync-env.sh` (via `dev-deploy.sh` under the hood) packages the Universal Helm Chart and serves it via a lightweight, ephemeral `nginx` container on port `8081`.
-2. The generated ArgoCD apps point to `http://host.k3d.internal:8081`, allowing the k3d cluster to fetch the local charts dynamically.
+1. `sync-env.sh` (via `dev-deploy.sh` under the hood) packages the Universal Helm Chart, mock charts, and the local Confluent Kafka chart, then serves them via a lightweight, ephemeral `nginx` container on port `8081`.
+2. Generated ArgoCD apps for local charts point to `http://host.k3d.internal:8081`, allowing the k3d cluster to fetch those charts dynamically.
 3. Scripts are built to fail-fast and auto-cleanup if a scaffold step fails, ensuring no partial or corrupted states.
+
+## Local Kafka Design
+
+DeployGuard uses a small local chart in `platform/confluent-kafka-chart` instead of overriding a third-party chart image. The chart runs `confluentinc/cp-kafka:8.0.6` in KRaft mode as a single Deployment with one replica. It is intentionally ephemeral: Kafka data lives in `emptyDir` and is discarded when the pod is recreated. Kubernetes service-link environment injection is disabled for this pod so generated variables such as `KAFKA_PORT` cannot conflict with Confluent's startup scripts.
+
+This keeps local deployments light while preserving compatibility with services that expect a normal Kafka broker. The stable service address is `kafka:9092`, auto topic creation is enabled, and internal topics use replication factor `1`, which is appropriate for single-node local development.
 
 ## CI/CD Guardrails
 
 This repository includes a GitHub Actions workflow (`.github/workflows/cluster-integration.yml`). On every push to the master branch or pull request, it runs a full **End-to-End Cluster Validation**. 
 
 It dynamically spins up an ephemeral k3d cluster, bootstraps ArgoCD, applies the `deployguard.yaml` topology, and runs the entire `sync-env` and `verify` flow. This ensures no change breaks the local GitOps pipeline.
+
+The workflow keeps a generic failure-debug step that prints ArgoCD application state, deployguard workloads, non-running pod descriptions, recent logs, and recent events. Keep this step in CI: it is low-risk, runs only on failure, and makes infrastructure failures diagnosable without reproducing them locally.

@@ -89,6 +89,7 @@ EOF
     if [[ -f "${json_file}" ]]; then
       echo "  $(basename "${json_file}"): |" >> "${CHART_DIR}/templates/configmap.yaml"
       sed 's/^/    /' "${json_file}" >> "${CHART_DIR}/templates/configmap.yaml"
+      printf '\n' >> "${CHART_DIR}/templates/configmap.yaml"
     fi
   done
 

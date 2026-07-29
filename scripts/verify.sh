@@ -6,6 +6,7 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:-deployguard}"
 RELEASE_NAMES="${RELEASE_NAMES:-}"
 HEALTH_PATH="${HEALTH_PATH:-/health}"
+EXTERNAL_DEPS="${EXTERNAL_DEPS:-}"
 
 for cmd in kubectl curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -15,12 +16,23 @@ for cmd in kubectl curl; do
 done
 
 if [[ -z "${RELEASE_NAMES// }" ]]; then
+  IFS=',' read -r -a EXTERNAL_DEPS_LIST <<< "${EXTERNAL_DEPS}"
   mapfile -t ALL_DETECTED < <(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | sort || true)
-  if [[ ${#ALL_DETECTED[@]} -eq 0 ]]; then
+  
+  declare -a FILTERED_RELEASES=()
+  for app in "${ALL_DETECTED[@]}"; do
+    is_ext=false
+    for p in "${EXTERNAL_DEPS_LIST[@]}"; do
+      [[ "${app}" == "${p// /}" ]] && is_ext=true && break
+    done
+    [[ "${is_ext}" == "false" ]] && FILTERED_RELEASES+=("${app}")
+  done
+
+  if [[ ${#FILTERED_RELEASES[@]} -eq 0 ]]; then
     echo "ERROR: RELEASE_NAMES not provided and no ArgoCD service applications were detected"
     exit 1
   fi
-  RELEASE_NAMES="$(IFS=','; echo "${ALL_DETECTED[*]}")"
+  RELEASE_NAMES="$(IFS=','; echo "${FILTERED_RELEASES[*]}")"
   echo "INFO: Auto-detected RELEASE_NAMES=${RELEASE_NAMES}"
 fi
 

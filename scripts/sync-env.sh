@@ -159,15 +159,16 @@ for app in $EXISTING_APPS; do
   fi
 done
 
+export EXTERNAL_DEPS="${DEPS}"
 export MOCK_APP_NAMES="${MOCKS}"
 export ARGO_APP_NAMES="${ALL_APPS}"
 export SKIP_VERIFY="true"
 
 "${REPO_ROOT}/scripts/dev-deploy.sh"
-
 # Save the variables for the separate verify step of the CI
 cat <<EOF > "${REPO_ROOT}/.sync-env.env"
 export SERVICES="${SERVICES}"
 export MOCKS="${MOCKS}"
+export EXTERNAL_DEPS="${DEPS}"
 EOF
 echo "INFO: Environment synced successfully!"

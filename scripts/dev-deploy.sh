@@ -12,6 +12,7 @@ SKIP_VERIFY="${SKIP_VERIFY:-false}"
 
 MOCK_MEMORY_LIMIT="${MOCK_MEMORY_LIMIT:-256Mi}"
 MOCK_JAVA_OPTS="${MOCK_JAVA_OPTS:--Xmx128m}"
+EXTERNAL_DEPS="${EXTERNAL_DEPS:-}"
 
 for cmd in docker k3d kubectl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -36,6 +37,15 @@ if [[ -z "${ARGO_APP_NAMES// }" ]]; then
 fi
 
 IFS=',' read -r -a ARGO_APPS <<< "${ARGO_APP_NAMES}"
+IFS=',' read -r -a EXTERNAL_DEPS_LIST <<< "${EXTERNAL_DEPS}"
+
+is_external_dep() {
+  local target="$1"
+  for ext in "${EXTERNAL_DEPS_LIST[@]}"; do
+    [[ "${target}" == "${ext// /}" ]] && return 0
+  done
+  return 1
+}
 
 declare -a SANITIZED_APPS=()
 for app in "${ARGO_APPS[@]}"; do
@@ -86,7 +96,7 @@ EOF
     fi
   done
 
-  cat > "${CHART_DIR}/templates/wiremock.yaml" <<'EOF'
+  cat > "${CHART_DIR}/templates/wiremock.yaml" <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -187,8 +197,7 @@ done
 
 declare -a IMAGES_TO_IMPORT=()
 for app_name in "${SANITIZED_APPS[@]}"; do
-  is_platform_app "${app_name}" && continue
-
+  is_external_dep "${app_name}" && continue
   is_mock="false"
   for m in "${MOCK_APPS_LIST[@]}"; do
     [[ "${app_name}" == "${m}" ]] && is_mock="true" && break
@@ -290,7 +299,7 @@ else
   if [[ -z "${VERIFY_RELEASE_NAMES// }" ]]; then
     release_list=()
     for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
-      is_platform_app "${app_name}" || release_list+=("${app_name}")
+      is_external_dep "${app_name}" || release_list+=("${app_name}")
     done
     if [[ ${#release_list[@]} -eq 0 ]]; then
       echo "ERROR: No service releases found for verification"

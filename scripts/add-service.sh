@@ -10,14 +10,14 @@ IMAGE_TAG="v1"
 CONTAINER_PORT="8000"
 SERVICE_PORT="80"
 HEALTH_PATH="/health"
-METRICS_PATH="/metrics"
 NAMESPACE="deployguard"
 PERSISTENCE_ENABLED="false"
 STORAGE_SIZE=""
 STORAGE_MOUNT="/data"
-
 APP_DIR="${REPO_ROOT}/app/${SERVICE_NAME}"
 GITOPS_FILE="${REPO_ROOT}/platform/gitops/${SERVICE_NAME}.yaml"
+
+mkdir -p "${REPO_ROOT}/platform/gitops"
 
 if [[ -z "${SERVICE_NAME}" ]]; then
   echo "ERROR: Missing service name"
@@ -52,6 +52,9 @@ fi
 
 INIT_COMMAND="${ENV_VARS[INIT_COMMAND]:-}"
 unset ENV_VARS[INIT_COMMAND] # Remove from standard env list so it's not injected into the app container
+
+RESOURCES_YAML=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .resources" "$REPO_ROOT/deployguard.yaml" 2>/dev/null | grep -v "null" || true)
+
 WORKLOAD_TYPE=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .type" "$REPO_ROOT/deployguard.yaml" 2>/dev/null | grep -v "null" || true)
 WORKLOAD_TYPE="${WORKLOAD_TYPE:-webservice}"
 
@@ -67,13 +70,17 @@ ingress:
   host: ${SERVICE_NAME}.127.0.0.1.nip.io
 health:
   path: ${HEALTH_PATH}
-metrics:
-  path: ${METRICS_PATH}
 persistence:
   enabled: ${PERSISTENCE_ENABLED}
   size: \"${STORAGE_SIZE}\"
   mountPath: \"${STORAGE_MOUNT}\"
 initCommand: \"${INIT_COMMAND}\""
+
+if [[ -n "$RESOURCES_YAML" ]]; then
+  VALUES_YAML="${VALUES_YAML}
+resources:
+$(echo "$RESOURCES_YAML" | sed 's/^/  /')"
+fi
 
 if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
   VALUES_YAML="${VALUES_YAML}

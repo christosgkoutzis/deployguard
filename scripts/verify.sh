@@ -1,26 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 # Usage: ./scripts/verify.sh
-# Optional: RELEASE_NAMES=my-service EXPECTED_METRIC=http_requests_total PROM_EXPECTED_JOBS=my-service,prometheus HEALTH_PATH=/health METRICS_PATH=/metrics ./scripts/verify.sh
 
 NAMESPACE="${NAMESPACE:-deployguard}"
 RELEASE_NAMES="${RELEASE_NAMES:-}"
-LOCAL_PORT="${LOCAL_PORT:-18080}"
-SERVICE_PORT="${SERVICE_PORT:-80}"
 HEALTH_PATH="${HEALTH_PATH:-/health}"
-METRICS_PATH="${METRICS_PATH:-/metrics}"
-EXPECTED_METRIC="${EXPECTED_METRIC:-}"
-VERIFY_MONITORING="${VERIFY_MONITORING:-true}"
-PLATFORM_APPS="${PLATFORM_APPS:-prometheus}"
-PROM_NAMESPACE="${PROM_NAMESPACE:-monitoring}"
-PROM_RELEASE_NAME="${PROM_RELEASE_NAME:-prometheus}"
-PROM_EXPECTED_JOBS="${PROM_EXPECTED_JOBS:-}"
-PROM_SERVICE_NAME="${PROM_SERVICE_NAME:-${PROM_RELEASE_NAME}-server}"
-PROM_LOCAL_PORT="${PROM_LOCAL_PORT:-19090}"
-PROM_SERVICE_PORT="${PROM_SERVICE_PORT:-80}"
-PROM_PORT_FORWARD_LOG="${PROM_PORT_FORWARD_LOG:-/tmp/${PROM_RELEASE_NAME}-port-forward.log}"
 
-for cmd in kubectl curl python3; do
+for cmd in kubectl curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: Missing command '$cmd'"
     exit 1
@@ -28,43 +15,27 @@ for cmd in kubectl curl python3; do
 done
 
 if [[ -z "${RELEASE_NAMES// }" ]]; then
-  IFS=',' read -r -a PLATFORM_APPS_LIST <<< "${PLATFORM_APPS}"
   mapfile -t ALL_DETECTED < <(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | sort || true)
- 
-  declare -a FILTERED_RELEASES=()
-  for app in "${ALL_DETECTED[@]}"; do
-    is_platform=false
-    for p in "${PLATFORM_APPS_LIST[@]}"; do
-      [[ "${app}" == "${p// /}" ]] && is_platform=true && break
-    done
-    [[ "${is_platform}" == "false" ]] && FILTERED_RELEASES+=("${app}")
-  done
-
-  if [[ ${#FILTERED_RELEASES[@]} -eq 0 ]]; then
+  if [[ ${#ALL_DETECTED[@]} -eq 0 ]]; then
     echo "ERROR: RELEASE_NAMES not provided and no ArgoCD service applications were detected"
     exit 1
   fi
-  RELEASE_NAMES="$(IFS=','; echo "${FILTERED_RELEASES[*]}")"
+  RELEASE_NAMES="$(IFS=','; echo "${ALL_DETECTED[*]}")"
   echo "INFO: Auto-detected RELEASE_NAMES=${RELEASE_NAMES}"
 fi
 
-if [[ "${HEALTH_PATH}" != /* ]] || [[ "${METRICS_PATH}" != /* ]]; then
-  echo "ERROR: HEALTH_PATH and METRICS_PATH must start with '/'"
+if [[ "${HEALTH_PATH}" != /* ]]; then
+  echo "ERROR: HEALTH_PATH must start with '/'"
   exit 1
 fi
 
 IFS=',' read -r -a RELEASE_LIST <<< "${RELEASE_NAMES}"
-
 for release in "${RELEASE_LIST[@]}"; do
   release_name="${release// /}"
-
   if [[ -z "${release_name}" ]]; then
     echo "ERROR: RELEASE_NAMES contains an empty entry"
     exit 1
   fi
-
-  service_name="${release_name}-service"
-  port_forward_log="/tmp/${release_name}-port-forward.log"
 
   is_mock="false"
   if [[ -n "${MOCK_APP_NAMES:-}" ]]; then
@@ -96,21 +67,22 @@ for release in "${RELEASE_LIST[@]}"; do
   echo "INFO: Waiting for workload rollout for ${release_name}"
   workload_type=$(kubectl -n "${NAMESPACE}" get deploy,sts -l "app=${release_name}" -o jsonpath='{.items[0].kind}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
   workload_name=$(kubectl -n "${NAMESPACE}" get deploy,sts -l "app=${release_name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-  
+
   if [[ -z "${workload_name}" ]]; then
     echo "ERROR: Could not detect Deployment or StatefulSet for ${release_name}"
     exit 1
   fi
+
   kubectl -n "${NAMESPACE}" rollout status "${workload_type}/${workload_name}" --timeout=120s
 
-app_url="http://${release_name}.127.0.0.1.nip.io:8080"
+  app_url="http://${release_name}.127.0.0.1.nip.io:8080"
+  has_ingress=$(kubectl -n "${NAMESPACE}" get ingress "${release_name}-ingress" --ignore-not-found 2>/dev/null || true)
 
-has_ingress=$(kubectl -n "${NAMESPACE}" get ingress "${release_name}-ingress" --ignore-not-found 2>/dev/null || true)
   if [[ -z "${has_ingress}" ]]; then
     echo "INFO: Archetype is 'worker'. Skipping HTTP checks for ${release_name}."
     continue
   fi
-  
+
   echo "INFO: Waiting for Ingress routing to become active for ${release_name}"
   wait_time=0
   while ! curl -fsS "${app_url}${local_health_path}" >/dev/null 2>&1; do
@@ -124,108 +96,6 @@ has_ingress=$(kubectl -n "${NAMESPACE}" get ingress "${release_name}-ingress" --
     echo "ERROR: Health endpoint ${local_health_path} failed for ${release_name}"
     exit 1
   fi
-
-  if [[ "${is_mock}" == "false" ]]; then
-    echo "INFO: Checking ${METRICS_PATH} for ${release_name}"
-    if ! METRICS_BODY=$(curl -fsS "${app_url}${METRICS_PATH}"); then
-      echo "ERROR: Metrics endpoint ${METRICS_PATH} unreachable for ${release_name}"
-      exit 1
-    fi
-    if [[ -n "${EXPECTED_METRIC}" ]]; then
-      if ! echo "${METRICS_BODY}" | grep -q "${EXPECTED_METRIC}"; then
-        echo "ERROR: Expected metric '${EXPECTED_METRIC}' not found for ${release_name}"
-        exit 1
-      fi
-    else
-      if ! echo "${METRICS_BODY}" | grep -Eq '# HELP|# TYPE'; then
-        echo "ERROR: No Prometheus metrics format detected for ${release_name}"
-        exit 1
-      fi
-    fi
-  else
-    echo "INFO: Skipping metrics check for mock service ${release_name}"
-  fi
 done
-
-if [[ "${VERIFY_MONITORING}" == "true" ]]; then
-  if [[ -z "${PROM_EXPECTED_JOBS// }" ]]; then
-    PROM_EXPECTED_JOBS="${RELEASE_NAMES},prometheus"
-  fi
-
-  IFS=',' read -r -a PROM_JOB_LIST <<< "${PROM_EXPECTED_JOBS}"
-
-  if kubectl -n "${PROM_NAMESPACE}" get svc "${PROM_SERVICE_NAME}" >/dev/null 2>&1; then
-    prom_url="http://prometheus.127.0.0.1.nip.io:8080"
-    echo "INFO: Waiting for Prometheus targets to become healthy via Ingress..."
-    max_retries=15
-    retry_count=0
-    targets_healthy=false
-
-    while [[ ${retry_count} -lt ${max_retries} ]]; do
-      if TARGETS_JSON=$(curl -fsS "${prom_url}/api/v1/targets" 2>/dev/null); then
-        all_up=true
-        for job in "${PROM_JOB_LIST[@]}"; do
-              job_name="${job// /}"
-              if [[ -z "${job_name}" ]]; then continue; fi
-              if ! kubectl -n "${NAMESPACE}" get svc "${job_name}-service" >/dev/null 2>&1; then
-                continue
-              fi
-              
-              is_mock_job="false"
-              if [[ -n "${MOCK_APP_NAMES:-}" ]]; then
-                IFS=',' read -r -a mock_job_arr <<< "${MOCK_APP_NAMES}"
-                for m in "${mock_job_arr[@]}"; do
-                  if [[ "${m// /}" == "${job_name}" ]]; then
-                    is_mock_job="true"
-                    break
-                  fi
-                done
-              fi
-              if [[ "${is_mock_job}" == "true" ]]; then continue; fi
-
-              if ! python3 -c "
-import json, sys
-data = json.loads(sys.stdin.read())
-targets = data.get('data', {}).get('activeTargets', [])
-up_jobs  = {t['labels'].get('job') for t in targets if t.get('health') == 'up'}
-if '${job_name}' not in up_jobs: sys.exit(1)
-" <<< "${TARGETS_JSON}" >/dev/null 2>&1; then
-            all_up=false
-            break
-          fi
-        done
-        if [[ "${all_up}" == "true" ]]; then
-          targets_healthy=true
-          break
-        fi
-      fi
-      sleep 5
-      retry_count=$((retry_count + 1))
-    done
-
-    if [[ "${targets_healthy}" == "false" ]]; then
-      echo "ERROR: Prometheus targets did not become healthy in time."
-      exit 1
-    fi
-
-    if [[ -n "${EXPECTED_METRIC}" ]]; then
-      echo "INFO: Checking Prometheus query"
-      if ! QUERY_JSON=$(curl -fsS --get --data-urlencode "query=${EXPECTED_METRIC}" "${prom_url}/api/v1/query"); then
-        echo "ERROR: Prometheus query check failed."
-        exit 1
-      fi
-      if ! echo "${QUERY_JSON}" | grep -q '"status":"success"'; then
-        echo "ERROR: Prometheus query for '${EXPECTED_METRIC}' failed"
-        exit 1
-      fi
-    else
-      echo "INFO: EXPECTED_METRIC not set, skipping Prometheus query check"
-    fi
-  else
-    echo "INFO: Prometheus service not found, skipping monitoring checks"
-  fi
-else
-  echo "INFO: VERIFY_MONITORING=false, skipping monitoring checks"
-fi
 
 echo "INFO: Verification passed"

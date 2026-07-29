@@ -25,20 +25,16 @@ jobs:
       - name: Verify Focused Environment
         run: |
           source .sync-env.env
-          PLATFORM_APPS="${PLATFORM_APPS_COMBINED}" \
           MOCK_APP_NAMES="${MOCKS}" \
-          VERIFY_PROM_EXPECTED_JOBS="${SERVICES},prometheus" \
           ./scripts/verify.sh
 
       - name: Sync Full Environment (Deploy all services)
         run: ./scripts/sync-env.sh
-
+      
       - name: Verify Full Environment
         run: |
           source .sync-env.env
-          PLATFORM_APPS="${PLATFORM_APPS_COMBINED}" \
           MOCK_APP_NAMES="${MOCKS}" \
-          VERIFY_PROM_EXPECTED_JOBS="${SERVICES},prometheus" \
           ./scripts/verify.sh
 
       - name: E2E Functional Validation (Kafka Event-Driven Flow)

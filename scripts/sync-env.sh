@@ -38,7 +38,6 @@ parse_list() {
 
 SERVICES=$(parse_list '[.services[].name] | join(",")')
 MOCKS=$(parse_list '.mocks | join(",")')
-PLATFORM=$(parse_list '.platform_apps | join(",")')
 DEPS=$(parse_list '[.dependencies[].name] | join(",")')
 
 # Apply Focus Graph Resolution (Full Recursive Tree)
@@ -95,7 +94,7 @@ fi
 
 # 0. Clean stale local GitOps state
 echo "INFO: === Cleaning up stale GitOps manifests ==="
-find "${REPO_ROOT}/platform/gitops" -type f -name "*.yaml" ! -name "prometheus.yaml" -delete 2>/dev/null || true
+find "${REPO_ROOT}/platform/gitops" -type f -name "*.yaml" -delete 2>/dev/null || true
 
 # 1. Scaffold Services
 echo "INFO: === Scaffolding Services ==="
@@ -148,8 +147,7 @@ done
 echo "INFO: === Triggering Strict GitOps Deployment ==="
 
 # Safely join the variables (remove redundant commas)
-ALL_APPS=$(echo "${DEPS},${SERVICES},${PLATFORM},${MOCKS}" | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
-PLATFORM_APPS_COMBINED=$(echo "${PLATFORM},${DEPS}" | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
+ALL_APPS=$(echo "${DEPS},${SERVICES},${MOCKS}" | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
 
 # Active Pruning: Delete ArgoCD apps that are no longer in focus to free up RAM
 echo "INFO: === Pruning out-of-focus applications ==="
@@ -161,7 +159,6 @@ for app in $EXISTING_APPS; do
   fi
 done
 
-export PLATFORM_APPS="${PLATFORM_APPS_COMBINED}"
 export MOCK_APP_NAMES="${MOCKS}"
 export ARGO_APP_NAMES="${ALL_APPS}"
 export SKIP_VERIFY="true"
@@ -172,6 +169,5 @@ export SKIP_VERIFY="true"
 cat <<EOF > "${REPO_ROOT}/.sync-env.env"
 export SERVICES="${SERVICES}"
 export MOCKS="${MOCKS}"
-export PLATFORM_APPS_COMBINED="${PLATFORM_APPS_COMBINED}"
 EOF
 echo "INFO: Environment synced successfully!"

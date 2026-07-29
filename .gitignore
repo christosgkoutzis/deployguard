@@ -2,5 +2,3 @@
 platform/charts/*
 platform/gitops/*.yaml
 
-# Keep the platform monitoring app manifest committed
-!platform/gitops/prometheus.yaml

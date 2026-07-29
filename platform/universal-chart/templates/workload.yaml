@@ -21,10 +21,14 @@ spec:
       labels:
         app: {{ .Release.Name }}
     spec:
-      containers:
+     containers:
       - name: {{ .Release.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: Never
+        {{- if .Values.resources }}
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
+        {{- end }}
         {{- if eq (default "webservice" .Values.workloadType) "webservice" }}
         ports:
         - containerPort: {{ .Values.service.targetPort }}

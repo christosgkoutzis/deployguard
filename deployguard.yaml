@@ -1,8 +1,5 @@
 name: deployguard-local-env
 
-platform_apps:
-  - prometheus
-
 dependencies:
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
@@ -35,6 +32,9 @@ services:
       - kafka
     env:
       - INIT_COMMAND="python migrate.py"
+    resources:
+      limits:
+        memory: 256Mi
   - name: ruby-gateway
     depends_on:
       - python-backend

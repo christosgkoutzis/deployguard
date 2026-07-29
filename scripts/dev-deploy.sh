@@ -6,10 +6,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
 IMAGE_TAG="${IMAGE_TAG:-v1}"
 ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
-ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,sql-database,prometheus}"
+ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,sql-database}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-180}"
 SKIP_VERIFY="${SKIP_VERIFY:-false}"
-PLATFORM_APPS="${PLATFORM_APPS:-prometheus}"
+
+MOCK_MEMORY_LIMIT="${MOCK_MEMORY_LIMIT:-256Mi}"
+MOCK_JAVA_OPTS="${MOCK_JAVA_OPTS:--Xmx128m}"
 
 for cmd in docker k3d kubectl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -34,7 +36,6 @@ if [[ -z "${ARGO_APP_NAMES// }" ]]; then
 fi
 
 IFS=',' read -r -a ARGO_APPS <<< "${ARGO_APP_NAMES}"
-IFS=',' read -r -a PLATFORM_APPS_LIST <<< "${PLATFORM_APPS}"
 
 declare -a SANITIZED_APPS=()
 for app in "${ARGO_APPS[@]}"; do
@@ -51,14 +52,6 @@ if [[ -n "${MOCK_APP_NAMES// }" ]]; then
     [[ -n "${m_name}" ]] && MOCK_APPS_LIST+=("${m_name}")
   done
 fi
-
-is_platform_app() {
-  local target="$1"
-  for p_app in "${PLATFORM_APPS_LIST[@]}"; do
-    [[ "${target}" == "${p_app// /}" ]] && return 0
-  done
-  return 1
-}
 
 for mock_name in "${MOCK_APPS_LIST[@]}"; do
   MOCK_DIR="${REPO_ROOT}/platform/mocks/${mock_name}"
@@ -114,6 +107,14 @@ spec:
       - name: wiremock
         image: wiremock/wiremock:3.3.1
         args: ["--global-response-templating", "--disable-gzip"]
+        env:
+        - name: JAVA_OPTS
+          value: "${MOCK_JAVA_OPTS}"
+        resources:
+          limits:
+            memory: "${MOCK_MEMORY_LIMIT}"
+          requests:
+            memory: 128Mi
         ports:
         - containerPort: 8080
         volumeMounts:
@@ -298,13 +299,8 @@ else
     VERIFY_RELEASE_NAMES="$(IFS=','; echo "${release_list[*]}")"
   fi
 
-  VERIFY_PROM_EXPECTED_JOBS="${VERIFY_PROM_EXPECTED_JOBS:-${ARGO_APP_NAMES}}"
-
   RELEASE_NAMES="${VERIFY_RELEASE_NAMES}" \
   MOCK_APP_NAMES="${MOCK_APP_NAMES:-}" \
-  PROM_EXPECTED_JOBS="${VERIFY_PROM_EXPECTED_JOBS}" \
-  EXPECTED_METRIC="${EXPECTED_METRIC:-}" \
   HEALTH_PATH="${HEALTH_PATH:-/health}" \
-  METRICS_PATH="${METRICS_PATH:-/metrics}" \
   "${REPO_ROOT}/scripts/verify.sh"
 fi

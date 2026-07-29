@@ -22,7 +22,7 @@ Installs missing tools (`kubectl`, `k3d`, `helm`, `yq`) and creates the local k3
 ./scripts/bootstrap-platform.sh
 ```
 
-Creates namespaces and installs ArgoCD. Also registers the Prometheus ArgoCD app.
+Creates namespaces and installs ArgoCD.
 
 ## 3) Define Environment Topology (Declarative)
 
@@ -32,9 +32,6 @@ Create a `deployguard.yaml` file in the root of the project:
 
 ```yaml
 name: deployguard-local-env
-
-platform_apps:
-  - prometheus
 
 dependencies:
   - name: postgres
@@ -123,10 +120,11 @@ Because the environment is now fully dynamic, run the verification script by sou
 
 ```bash
 source .sync-env.env
-PLATFORM_APPS="${PLATFORM_APPS_COMBINED}" MOCK_APP_NAMES="${MOCKS}" VERIFY_PROM_EXPECTED_JOBS="${SERVICES},prometheus" ./scripts/verify.sh
+MOCK_APP_NAMES="${MOCKS}" \
+./scripts/verify.sh
 ```
 
-Checks rollout, health endpoint, metrics endpoint, and Prometheus scraping specifically for the apps defined in your topology.
+Checks rollout, health endpoint, specifically for the apps defined in your topology.
 
 ## 6) Validate Service-to-Service Communication
 
@@ -153,16 +151,12 @@ ArgoCD Dashboard:
 Open **[http://argocd.127.0.0.1.nip.io:8080](http://argocd.127.0.0.1.nip.io:8080)**
 *(Username: `admin`, get password via `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`)*
 
-Prometheus Dashboard:
-Open **[http://prometheus.127.0.0.1.nip.io:8080](http://prometheus.127.0.0.1.nip.io:8080)**
-
 ## Acceptance Criteria
 
 1. `./scripts/sync-env.sh` completes without sync/health failures.
 2. `./scripts/verify.sh` passes (using the topology env variables).
 3. Ruby gateway returns content that includes Python backend response.
-4. Prometheus shows the expected service jobs as healthy targets.
-5. ArgoCD shows the selected application graph as Synced and Healthy.
+4. ArgoCD shows the selected application graph as Synced and Healthy.
 
 ## Notes on Generated Files
 

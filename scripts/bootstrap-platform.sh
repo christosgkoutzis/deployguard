@@ -11,7 +11,6 @@ helm repo update
 echo "INFO: Creating namespaces..."
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace deployguard --dry-run=client -o yaml | kubectl apply -f -
-kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
 echo "INFO: Installing/Upgrading ArgoCD..."
 helm upgrade --install argocd argo/argo-cd \
@@ -23,7 +22,4 @@ helm upgrade --install argocd argo/argo-cd \
     --set configs.params."server\.insecure"=true \
     --wait
 
-echo "INFO: Applying ArgoCD application manifests..."
-kubectl apply -f "${REPO_ROOT}/platform/gitops"
-
-echo "INFO: ArgoCD is installed and application definitions are ready!"
+echo "INFO: ArgoCD is installed and application definitions are ready!" 

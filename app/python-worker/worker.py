@@ -9,6 +9,7 @@ from confluent_kafka import Consumer, KafkaException
 DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
 VALIDATE_URL = os.getenv("VALIDATE_URL", "http://external-api-mock-service:80/api/validate")
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+
 engine = create_engine(DB_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -31,7 +32,7 @@ def wait_for_db():
             print(f"WARN: Database not ready... ({retries} retries left)")
             retries -= 1
             time.sleep(5)
-    
+            
     print("ERROR: Could not connect to the database. Worker exiting.")
     exit(1)
 
@@ -83,6 +84,23 @@ def run_worker():
                         pending.status = result
                         db.commit()
                         print(f"INFO: Greeting {greeting_id} set to {result}.")
+                        
+                        # NEW: Index to Elasticsearch if Approved!
+                        if result == "Approved":
+                            from elasticsearch import Elasticsearch
+                            ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
+                            try:
+                                es = Elasticsearch([ES_HOST])
+                                doc = {
+                                    "id": pending.id,
+                                    "greeting": pending.greeting,
+                                    "status": pending.status,
+                                    "created_at": pending.created_at.isoformat() if pending.created_at else None
+                                }
+                                es.index(index="greetings", document=doc)
+                                print(f"INFO: Greeting {greeting_id} indexed successfully in Elasticsearch.")
+                            except Exception as e:
+                                print(f"ERROR: Failed to index in ES: {e}")
                     db.close()
             except Exception as e:
                 print(f"ERROR: Processing failed: {e}")

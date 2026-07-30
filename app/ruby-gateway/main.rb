@@ -2,7 +2,6 @@ require 'sinatra'
 require 'net/http'
 require 'json'
 
-# Kubernetes Service DNS name for the python-backend service
 BACKEND_URL = ENV.fetch('BACKEND_URL', 'http://python-backend-service:80')
 
 set :port, 8000
@@ -17,22 +16,37 @@ get '/' do
   message = fetch_backend_message
   mocked_greeting = fetch_mocked_greeting
   db_message = params[:db_message] || ""
+  search_results = params[:search_results] || ""
+  
   content_type :html
   <<~HTML
     <html>
-      <body>
-        <h3>Hello from Ruby Gateway!</h3>
-        <h3>Message from Python Backend: <strong>#{message}</strong></h3>
-        <h4>Greeting from External Mock API: <strong>#{mocked_greeting}</strong></h4>
+      <body style="font-family: sans-serif; padding: 20px;">
+        <h2>DeployGuard Architecture Demo</h2>
+        <p><strong>Python Backend says:</strong> #{message}</p>
+        <p><strong>External API Mock says:</strong> #{mocked_greeting}</p>
         <hr/>
-        <h3>Database Actions</h3>
+        
+        <h3>1. Relational DB & Event-Driven Write (Postgres + Kafka)</h3>
         <form action="/write" method="POST" style="display:inline;">
-          <button type="submit">Write Greeting</button>
+          <button type="submit">Write New Event</button>
         </form>
+        
+        <h3>2. Cached Read (Redis)</h3>
         <form action="/read" method="GET" style="display:inline;">
           <button type="submit">Read Latest Greeting</button>
         </form>
-        <p><i>#{db_message}</i></p>
+        <p style="color: blue;"><i>#{db_message}</i></p>
+        
+        <hr/>
+        <h3>3. Full-Text Search (Elasticsearch)</h3>
+        <form action="/search" method="GET">
+          <input type="text" name="q" placeholder="Search greetings..." required>
+          <button type="submit">Search</button>
+        </form>
+        <div style="background-color: #f4f4f4; padding: 10px;">
+          #{search_results}
+        </div>
       </body>
     </html>
   HTML
@@ -41,7 +55,7 @@ end
 post '/write' do
   uri = URI("#{BACKEND_URL}/db/write")
   Net::HTTP.post(uri, "")
-  redirect '/?db_message=Successfully wrote to database'
+  redirect '/?db_message=Successfully triggered write event to Kafka & DB'
 end
 
 get '/read' do
@@ -52,10 +66,30 @@ get '/read' do
   if data['error']
     msg = data['error']
   else
-    msg = "#{data['greeting']} | Status: [#{data['status']}] | Created: #{data['created_at']}"
+    msg = "Status: #{data['status']} | Source: #{data['source'] || 'Unknown'}"
+  end
+  redirect "/?db_message=#{URI.encode_www_form_component(msg)}"
+end
+
+get '/search' do
+  query = params[:q]
+  uri = URI("#{BACKEND_URL}/search?q=#{URI.encode_www_form_component(query)}")
+  response = Net::HTTP.get_response(uri)
+  data = JSON.parse(response.body)
+  
+  if data['error']
+    results = "<p style='color:red;'>#{data['error']}</p>"
+  elsif data['results'] && data['results'].empty?
+    results = "<p>No results found for '#{query}'.</p>"
+  else
+    results = "<ul>"
+    data['results'].each do |res|
+      results += "<li>ID: #{res['id']} | Status: #{res['status']}</li>"
+    end
+    results += "</ul>"
   end
   
-  redirect "/?db_message=#{URI.encode_www_form_component(msg)}"
+  redirect "/?search_results=#{URI.encode_www_form_component(results)}"
 end
 
 helpers do
@@ -70,9 +104,8 @@ helpers do
   def fetch_mocked_greeting
     uri = URI("#{BACKEND_URL}/mock-greeting")
     response = Net::HTTP.get_response(uri)
-    data = JSON.parse(response.body)
-    data['greeting'] || data['error'] || 'No greeting available'
+    JSON.parse(response.body)['greeting'] || 'No greeting available'
   rescue => e
-    "Mocked Greeting API unavailable: #{e.message}"
+    "Mocked API unavailable: #{e.message}"
   end
 end

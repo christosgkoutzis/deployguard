@@ -1,11 +1,11 @@
 name: deployguard-local-env
-
 dependencies:
+  # 1. POSTGRES (Bitnami - TCP Data Service)
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
     version: "" 
-    secret: 
+    secret:
       name: my-postgres-secret
       key_values:
         - "postgres-password=secretpassword"
@@ -15,6 +15,8 @@ dependencies:
       - "architecture=standalone"
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
+
+  # 2. KAFKA (Local DeployGuard KRaft Chart)
   - name: kafka
     repo: http://host.k3d.internal:8081
     chart: confluent-kafka
@@ -22,6 +24,35 @@ dependencies:
     set:
       - "image.tag=8.0.6"
       - "heapOpts=-Xms256m -Xmx256m"
+
+  # 3. REDIS (Bitnami - TCP Data Service)
+  - name: redis
+    repo: https://charts.bitnami.com/bitnami
+    chart: redis
+    version: ""
+    set:
+      - "architecture=standalone"
+      - "auth.enabled=false"
+      - "master.persistence.size=100Mi"
+      - "master.resources.limits.memory=128Mi"
+
+  # 4. ELASTICSEARCH (DeployGuard Universal Chart - HTTP Data Service)
+  - name: elasticsearch
+    repo: http://host.k3d.internal:8081
+    chart: universal-chart
+    version: "0.1.0"
+    set:
+      - "persistence.enabled=false"
+      - "image.repository=docker.elastic.co/elasticsearch/elasticsearch"
+      - "image.tag=8.11.0"
+      - "service.port=9200"
+      - "service.targetPort=9200"
+      - "health.path=/"
+      - "ingress.host=elasticsearch.127.0.0.1.nip.io"
+      - "env.ES_SETTING_DISCOVERY_TYPE=single-node"
+      - "env.ES_SETTING_XPACK_SECURITY_ENABLED=false"
+      - "env.ES_SETTING_NODE_STORE_ALLOW__MMAP=false"
+      - "env.ES_JAVA_OPTS=-Xms512m -Xmx512m"
 mocks:
   - external-api-mock
 
@@ -30,19 +61,27 @@ services:
     depends_on:
       - postgres
       - kafka
+      - redis
+      - elasticsearch
     env:
       - INIT_COMMAND="python migrate.py"
+      - ES_HOST="http://elasticsearch-service:9200"
     resources:
       limits:
         memory: 256Mi
+
   - name: ruby-gateway
     depends_on:
       - python-backend
     env:
       - BACKEND_URL="http://python-backend-service:80"
+
   - name: python-worker
     type: worker
     depends_on:
       - postgres
       - kafka
       - external-api-mock
+      - elasticsearch
+    env:
+      - ES_HOST="http://elasticsearch-service:9200"

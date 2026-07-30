@@ -37,12 +37,12 @@ jobs:
           MOCK_APP_NAMES="${MOCKS}" \
           ./scripts/verify.sh
 
-      - name: E2E Functional Validation (Kafka Event-Driven Flow)
+      - name: E2E Functional Validation (Kafka, Redis & ES Flow)
         run: |
           echo "INFO: Triggering a new greeting write..."
           curl -s -X POST http://python-backend.127.0.0.1.nip.io:8080/db/write
           
-          echo "INFO: Polling database state for eventual consistency..."
+          echo "INFO: Polling database state for eventual consistency (via Redis Cache)..."
           MAX_RETRIES=15
           RETRY_COUNT=0
           SUCCESS=false
@@ -66,6 +66,17 @@ jobs:
             exit 1
           fi
 
+          echo "INFO: Validating Elasticsearch indexing & search..."
+          # Sleep for 2 seconds to ensure ES has refreshed its index
+          sleep 2
+          SEARCH_RESULT=$(curl -s "http://ruby-gateway.127.0.0.1.nip.io:8080/search?q=Approved")
+          if [[ "$SEARCH_RESULT" == *"Elasticsearch Error"* || "$SEARCH_RESULT" == *"No results found"* ]]; then
+            echo "ERROR: Elasticsearch connection or indexing failed. Result: $SEARCH_RESULT"
+            exit 1
+          fi
+          
+          echo "SUCCESS: E2E Flow (Kafka, Redis, ES) completed successfully!"
+          
       - name: Debug Cluster State On Failure
         if: ${{ failure() }}
         run: |

@@ -10,7 +10,19 @@ from confluent_kafka import Producer
 import json
 import redis
 from elasticsearch import Elasticsearch
+import hvac
+import boto3
 
+# Vault Graceful Fallback Helper
+def get_secret(path, key, default_env_val):
+    try:
+        client = hvac.Client(url=os.getenv("VAULT_URL", "http://vault-service:8200"), token="deployguard-root-token")
+        if client.is_authenticated():
+            res = client.secrets.kv.v2.read_secret_version(path=path)
+            return res['data']['data'].get(key, default_env_val)
+    except Exception:
+        pass # TODO: seed the vault, fallbacks to env for now
+    return default_env_val
 APP_NAME = os.getenv("APP_NAME", "python-backend")
 DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL", "http://external-api-mock-service:80")
@@ -86,11 +98,18 @@ def read_db():
     except Exception as e:
         return {"error": str(e)}
 
+LOCALSTACK_URL = os.getenv("LOCALSTACK_URL", "http://localstack-service:4566")
+sqs = boto3.client('sqs', endpoint_url=LOCALSTACK_URL, region_name='us-east-1')
+s3 = boto3.client('s3', endpoint_url=LOCALSTACK_URL, region_name='us-east-1')
+
 @app.post("/db/write")
-def write_db():
+async def write_db(request: Request):
     try:
+        data = await request.json()
+        custom_greeting = data.get("greeting", "Default Greeting")
+        
         db = SessionLocal()
-        new_greeting = Greeting(greeting="Awaiting validation from Worker")
+        new_greeting = Greeting(greeting=custom_greeting)
         db.add(new_greeting)
         db.commit()
         db.refresh(new_greeting)
@@ -115,3 +134,24 @@ def search(q: str):
         return {"results": results}
     except Exception as e:
         return {"error": f"Elasticsearch Error: {str(e)}"}
+
+@app.post("/report/generate")
+def generate_report():
+    try:
+        q = sqs.create_queue(QueueName='report-tasks')
+        sqs.send_message(QueueUrl=q['QueueUrl'], MessageBody=json.dumps({"task": "export_csv"}))
+        return {"status": "Task sent to SQS"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/report/download")
+def download_report():
+    try:
+        url = s3.generate_presigned_url(
+            ClientMethod='get_object',
+            Params={'Bucket': 'reports-bucket', 'Key': 'greetings_report.csv'},
+            ExpiresIn=3600
+        )
+        return {"download_url": url}
+    except Exception as e:
+        return {"error": str(e)}

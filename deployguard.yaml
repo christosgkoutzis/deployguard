@@ -1,6 +1,28 @@
-name: deployguard-local-env
 dependencies:
-  # 1. POSTGRES (Bitnami - TCP Data Service)
+  # 1. HASHICORP VAULT (Dev Mode)
+  - name: vault
+    repo: https://helm.releases.hashicorp.com
+    chart: vault
+    version: "0.27.0"
+    set:
+      - "server.dev.enabled=true"
+      - "server.dev.devRootToken=deployguard-root-token"
+      - "ui.enabled=true"
+      - "ui.serviceType=ClusterIP"
+      - "server.ingress.enabled=true"
+      - "server.ingress.ingressClassName=traefik"
+      - "server.ingress.hosts[0].host=vault.127.0.0.1.nip.io"
+  # 2. LOCALSTACK (AWS Mocks: S3, SQS)
+  - name: localstack
+    repo: https://localstack.github.io/helm-charts
+    chart: localstack
+    version: "0.6.14"
+    set:
+      - "persistence.enabled=false"
+      - "ingress.enabled=true"
+      - "ingress.ingressClassName=traefik"
+      - "ingress.hosts[0].host=localstack.127.0.0.1.nip.io"
+  # 3. POSTGRES (Bitnami - TCP Data Service)
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
@@ -85,3 +107,16 @@ services:
       - elasticsearch
     env:
       - ES_HOST="http://elasticsearch-service:9200"
+
+  - name: report-worker
+    type: worker
+    depends_on:
+      - postgres
+      - localstack
+      - vault
+    env:
+      - AWS_ACCESS_KEY_ID="test"
+      - AWS_SECRET_ACCESS_KEY="test"
+      - AWS_DEFAULT_REGION="us-east-1"
+      - LOCALSTACK_URL="http://localstack-service:4566"
+      - VAULT_URL="http://vault-service:8200"

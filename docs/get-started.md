@@ -79,13 +79,16 @@ services:
       - external-api-mock
 ```
 ### Dependency Graph & Event-Driven Architecture
+
 DeployGuard introduces a `depends_on` field. This allows the orchestrator to build a dependency graph for your microservices. 
 
-In our example, the system uses an **Event-Driven & Caching Architecture**:
+In our example, the system uses a full **Enterprise Event-Driven Architecture**:
 1. **Ruby Gateway** depends on **Python Backend**.
 2. **Python Backend** relies on **Redis** for fast caching. If a cache miss occurs, it queries **PostgreSQL**.
 3. **Python Backend** writes new events to **PostgreSQL** and publishes them to **Kafka**.
-4. **Python Worker** consumes events from **Kafka**, validates them via the **External API Mock**, updates **PostgreSQL**, and finally indexes the validated data into **Elasticsearch** for full-text search.
+4. **Python Backend** integrates with **HashiCorp Vault** for secure credential management (Graceful Fallback).
+5. **Python Worker** consumes events from **Kafka**, validates them via the **External API Mock**, updates **PostgreSQL**, and indexes data into **Elasticsearch**.
+6. **Report Worker** consumes async export tasks from **AWS SQS** (mocked by **LocalStack**), queries the DB, and uploads CSV reports to **AWS S3**.
 
 The included Kafka dependency is a lightweight single-node Confluent Kafka KRaft chart. Redis is deployed as a standalone cache without auth. Elasticsearch is deployed as a single node with strict JVM memory limits (`-Xmx512m`) to prevent local environment starvation.
 
@@ -138,13 +141,14 @@ Open your browser or run:
 ```bash
 curl [http://ruby-gateway.127.0.0.1.nip.io:8080/](http://ruby-gateway.127.0.0.1.nip.io:8080/)
 ```
+
 Expected behavior: 
-1. Ruby page includes a message fetched from the Python backend and the Mock API.
-2. Writing a greeting via the UI triggers a POST to the Python backend.
-3. The Python backend writes to PostgreSQL and publishes an event to Kafka.
-4. The Python Worker consumes the Kafka event, validates via the Mock API, updates the database, and indexes the result into Elasticsearch.
-5. Reading the greeting via the UI hits Redis (Cache) first, falling back to PostgreSQL if not found.
-6. Searching the greetings via the UI queries Elasticsearch directly via the Python search endpoint.
+1. **Sync Fetch:** Ruby page includes a message fetched from the Python backend and the Mock API.
+2. **Custom Write:** Submitting a custom greeting triggers a POST to the Python backend, writes to PostgreSQL, and publishes to Kafka.
+3. **Async Validation:** The Python Worker consumes the Kafka event, validates via the Mock API, updates Postgres, and indexes into Elasticsearch.
+4. **Cached Read:** Reading the latest greeting hits Redis (Cache) first, falling back to PostgreSQL if not found.
+5. **Full-Text Search:** Searching queries Elasticsearch directly.
+6. **Enterprise Export (S3/SQS):** Generating a report pushes a task to LocalStack SQS. The Report Worker processes it and uploads a CSV to LocalStack S3. Clicking download serves the file via an S3 Presigned URL.
 
 Optional direct Python check:
 ```bash

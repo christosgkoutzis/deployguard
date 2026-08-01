@@ -19,7 +19,7 @@ get '/' do
   search_results = params[:search_results] || ""
   
   content_type :html
-  <<~HTML
+ <<~HTML
     <html>
       <body style="font-family: sans-serif; padding: 20px;">
         <h2>DeployGuard Architecture Demo</h2>
@@ -29,7 +29,8 @@ get '/' do
         
         <h3>1. Relational DB & Event-Driven Write (Postgres + Kafka)</h3>
         <form action="/write" method="POST" style="display:inline;">
-          <button type="submit">Write New Event</button>
+          <input type="text" name="greeting_text" placeholder="Type your greeting..." required>
+          <button type="submit">Write Custom Event</button>
         </form>
         
         <h3>2. Cached Read (Redis)</h3>
@@ -47,6 +48,15 @@ get '/' do
         <div style="background-color: #f4f4f4; padding: 10px;">
           #{search_results}
         </div>
+
+        <hr/>
+        <h3>4. Enterprise Export (SQS & S3)</h3>
+        <form action="/report/generate" method="POST" style="display:inline;">
+          <button type="submit">1. Generate CSV Report (Async)</button>
+        </form>
+        <form action="/report/download" method="GET" style="display:inline;">
+          <button type="submit">2. Download Latest CSV</button>
+        </form>
       </body>
     </html>
   HTML
@@ -54,8 +64,29 @@ end
 
 post '/write' do
   uri = URI("#{BACKEND_URL}/db/write")
+  req = Net::HTTP::Post.new(uri, 'Content-Type' => 'application/json')
+  req.body = { greeting: params[:greeting_text] }.to_json
+  Net::HTTP.start(uri.hostname, uri.port) do |http|
+    http.request(req)
+  end
+  redirect '/?db_message=Successfully+triggered+write+event'
+end
+
+post '/report/generate' do
+  uri = URI("#{BACKEND_URL}/report/generate")
   Net::HTTP.post(uri, "")
-  redirect '/?db_message=Successfully triggered write event to Kafka & DB'
+  redirect '/?db_message=Report+generation+queued+in+SQS'
+end
+
+get '/report/download' do
+  uri = URI("#{BACKEND_URL}/report/download")
+  response = Net::HTTP.get_response(uri)
+  data = JSON.parse(response.body)
+  if data['download_url']
+    redirect data['download_url']
+  else
+    redirect '/?db_message=Report+not+ready+or+error'
+  end
 end
 
 get '/read' do

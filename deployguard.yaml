@@ -83,6 +83,40 @@ dependencies:
       - "env.ES_SETTING_XPACK_SECURITY_ENABLED=false"
       - "env.ES_SETTING_NODE_STORE_ALLOW__MMAP=false"
       - "env.ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+# 8. KAFBAT UI (Active Community Fork of Provectus Kafka UI)
+  - name: kafbat-ui
+    repo: https://kafbat.github.io/helm-charts
+    chart: kafka-ui
+    version: "*"
+    set:
+      - "envs.config.KAFKA_CLUSTERS_0_NAME=local-kraft"
+      - "envs.config.KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092"
+      - "envs.config.AUTH_TYPE=DISABLED"
+      - "resources.requests.cpu=50m"
+      - "resources.requests.memory=128Mi"
+      - "resources.limits.memory=256Mi"
+      - "ingress.enabled=true"
+      - "ingress.ingressClassName=traefik"
+      - "ingress.host=kafka-ui.127.0.0.1.nip.io"
+
+  # 9. DOZZLE (Lightweight K8s Log Viewer - Community Chart)
+  - name: dozzle
+    repo: https://abnerrizzi.github.io/charts/
+    chart: dozzle
+    version: "*"
+    set:
+      - "rbac.create=true"
+      - "serviceAccount.create=true"
+      - "env.DOZZLE_MODE=k8s"
+      - "env.DOZZLE_FILTER=status=running"
+      - "resources.requests.cpu=50m"
+      - "resources.requests.memory=64Mi"
+      - "resources.limits.memory=128Mi"
+      - "ingress.enabled=true"
+      - "ingress.ingressClassName=traefik"
+      - "ingress.hosts[0].host=dozzle.127.0.0.1.nip.io"
+      
 mocks:
   - external-api-mock
 

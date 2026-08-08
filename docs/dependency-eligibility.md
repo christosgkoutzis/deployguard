@@ -1,6 +1,6 @@
 # External Dependency Eligibility Contract
 
-This document defines exactly how DeployGuard supports external or platform-provided stateful/stateless dependencies (e.g., PostgreSQL, Kafka, Redis, RabbitMQ) via Kubernetes GitOps and generic Secrets.
+This document defines exactly how DeployGuard supports external or platform-provided stateful/stateless dependencies (e.g., PostgreSQL, Kafka, Redis, RabbitMQ) and observability tools (e.g., Kafbat UI, Dozzle) via Kubernetes GitOps and generic Secrets.
 
 ## The Core Concept
 Instead of containerizing community tools manually in the `app/` directory, DeployGuard leverages ArgoCD to fetch and deploy Helm charts. A dependency can point to a public/private Helm repository, or to the local ephemeral Helm repository served by `dev-deploy.sh` at `http://host.k3d.internal:8081`.

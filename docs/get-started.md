@@ -155,11 +155,19 @@ Optional direct Python check:
 curl [http://python-backend.127.0.0.1.nip.io:8080/message](http://python-backend.127.0.0.1.nip.io:8080/message)
 ```
 
-## 7) Check Platform Ecosystem
+## 7) Check Platform Ecosystem & Observability
 
-ArgoCD Dashboard:
-Open **[http://argocd.127.0.0.1.nip.io:8080](http://argocd.127.0.0.1.nip.io:8080)**
-*(Username: `admin`, get password via `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`)*
+You have instant access to multiple Web UIs for cluster management and live debugging, without needing terminal commands:
+
+* **ArgoCD Dashboard (GitOps):** 
+  Open **[http://argocd.127.0.0.1.nip.io:8080](http://argocd.127.0.0.1.nip.io:8080)**
+  *(Username: `admin`, get password via `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`)*
+
+* **Dozzle (Live Pod Logs):**
+  Open **[http://dozzle.127.0.0.1.nip.io:8080](http://dozzle.127.0.0.1.nip.io:8080)** to view a real-time stream of all active pod logs.
+
+* **Kafbat UI (Kafka Topic & Event Explorer):**
+  Open **[http://kafka-ui.127.0.0.1.nip.io:8080](http://kafka-ui.127.0.0.1.nip.io:8080)** to instantly view live broker metrics, explore topics, and inspect events.
 
 ## Acceptance Criteria
 

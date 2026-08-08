@@ -20,6 +20,7 @@ helm upgrade --install argocd argo/argo-cd \
     --set server.ingress.ingressClassName=traefik \
     --set "server.ingress.hosts[0]=argocd.127.0.0.1.nip.io" \
     --set configs.params."server\.insecure"=true \
-    --wait
+    --wait \
+    --timeout 5m
 
 echo "INFO: ArgoCD is installed and application definitions are ready!" 

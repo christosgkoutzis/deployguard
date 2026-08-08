@@ -20,8 +20,8 @@ The script generates a raw ArgoCD Application definition and optionally a Kubern
 ## Built-In Local Kafka
 Kafka is provided by the committed `platform/confluent-kafka-chart` chart. It runs a single-node Confluent Kafka broker in KRaft mode with Confluent Platform `8.0.6` / Apache Kafka 4.0.x, exposes `kafka:9092`, disables Kubernetes service-link environment injection to avoid Confluent startup variable collisions, and uses ephemeral `emptyDir` storage. It is designed for local development and CI validation, not durable production messaging.
 
-## Built-In Local RabbitMQ (Operator Pattern)
-DeployGuard utilizes the official Open-Source RabbitMQ Cluster Operator (via Chainguard). Because the Operator requires Custom Resources (CRDs) to provision a broker, the `deployguard.yaml` registers the remote operator first, and then uses a custom local chart (`platform/rabbitmq-instance-chart`) to deploy the `RabbitmqCluster` custom resource. This local instance is explicitly configured to use `emptyDir` storage for lightweight, non-persistent local development.
+## Built-In Local RabbitMQ
+DeployGuard utilizes a custom local chart (`platform/rabbitmq-instance-chart`) to deploy a lightweight, single-node RabbitMQ broker. Instead of relying on complex third-party operators, it directly deploys the official `rabbitmq:3-management` Docker image as a basic Kubernetes Deployment. This local instance is explicitly configured without persistent volumes (using strictly ephemeral container storage) to prevent state-mismatch loops during CI/CD restarts.
 
 ## Usage Example (Secure PostgreSQL)
 To provision an external service securely via K8s Secrets:

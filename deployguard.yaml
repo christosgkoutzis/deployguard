@@ -5,6 +5,7 @@ dependencies:
     chart: vault
     version: "0.27.0"
     set:
+      - "injector.enabled=false"
       - "server.dev.enabled=true"
       - "server.dev.devRootToken=deployguard-root-token"
       - "ui.enabled=true"
@@ -24,12 +25,7 @@ dependencies:
       - "rootPassword=adminpassword"
       - "resources.requests.memory=256Mi"
       - "resources.requests.cpu=100m"
-  # 3a. RABBITMQ OPERATOR (Official Cluster Operator)
-  - name: rabbitmq-operator
-    repo: https://charts.chainguard.dev/
-    chart: rabbitmq-cluster-operator
-    version: ""
-  # 3b. RABBITMQ INSTANCE (Local DeployGuard Custom Resource)
+  # 3. RABBITMQ (Native Local Chart)
   - name: rabbitmq
     repo: http://host.k3d.internal:8081
     chart: rabbitmq-instance
@@ -98,7 +94,6 @@ services:
       - redis
       - elasticsearch
       - minio
-      - rabbitmq-operator
       - rabbitmq
       - vault
     env:
@@ -135,7 +130,6 @@ services:
     depends_on:
       - postgres
       - minio
-      - rabbitmq-operator
       - rabbitmq
       - vault
     env:

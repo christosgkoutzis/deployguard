@@ -1,6 +1,6 @@
 apiVersion: v2
 name: rabbitmq-instance
 version: 0.1.0
-appVersion: "1.0.0"
-description: Lightweight single-node RabbitMQ Cluster Operator instance
+appVersion: "3-management"
+description: Native ephemeral single-node RabbitMQ for DeployGuard CI/CD
 type: application

@@ -116,6 +116,8 @@ dependencies:
       - "ingress.enabled=true"
       - "ingress.ingressClassName=traefik"
       - "ingress.hosts[0].host=dozzle.127.0.0.1.nip.io"
+      - "ingress.hosts[0].paths[0].path=/"
+      - "ingress.hosts[0].paths[0].pathType=Prefix"
       
 mocks:
   - external-api-mock

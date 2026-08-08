@@ -90,7 +90,7 @@ In our example, the system uses a full **Enterprise Event-Driven Architecture**:
 5. **Python Worker** consumes events from **Kafka**, validates them via the **External API Mock**, updates **PostgreSQL**, and indexes data into **Elasticsearch**.
 6. **Report Worker** consumes async export tasks from **RabbitMQ**, queries the DB, and uploads CSV reports to **MinIO** (S3 compatible storage).
 
-The included Kafka dependency is a lightweight single-node Confluent Kafka KRaft chart. Redis is deployed as a standalone cache without auth. Elasticsearch is deployed as a single node with strict JVM memory limits (`-Xmx512m`) to prevent local environment starvation.
+The included Kafka dependency is a lightweight single-node Confluent Kafka KRaft chart. Redis is deployed as a standalone cache without auth. Elasticsearch is deployed as a single node with strict JVM memory limits (`-Xmx512m`) to prevent local environment starvation. RabbitMQ is provisioned via the official Cluster Operator to ensure an enterprise-grade but lightweight local broker.
 
 The included Kafka dependency is a lightweight single-node Confluent Kafka KRaft chart for local development. It uses Confluent Platform `8.0.6`, which maps to Apache Kafka 4.0.x. It exposes the standard broker endpoint at `kafka:9092`, uses `emptyDir` storage instead of a PVC, and runs without ZooKeeper. The default heap is 256Mi with conservative CPU and memory requests so the local cluster stays responsive while still exercising the real Kafka protocol used by the services.
 

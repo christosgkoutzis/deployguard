@@ -12,29 +12,28 @@ dependencies:
       - "server.ingress.enabled=true"
       - "server.ingress.ingressClassName=traefik"
       - "server.ingress.hosts[0].host=vault.127.0.0.1.nip.io"
-  # 2. MINIO (Open-Source S3 Alternative)
+  # 2. MINIO (Official Open-Source S3)
   - name: minio
-    repo: https://charts.bitnami.com/bitnami
+    repo: https://charts.min.io/
     chart: minio
     version: ""
     set:
-      - "auth.rootUser=admin"
-      - "auth.rootPassword=adminpassword"
       - "mode=standalone"
       - "persistence.enabled=false"
-  # 3. RABBITMQ (Enterprise AMQP Queue)
-  - name: rabbitmq
-    repo: https://charts.bitnami.com/bitnami
-    chart: rabbitmq
+      - "rootUser=admin"
+      - "rootPassword=adminpassword"
+      - "resources.requests.memory=256Mi"
+      - "resources.requests.cpu=100m"
+  # 3a. RABBITMQ OPERATOR (Official Cluster Operator)
+  - name: rabbitmq-operator
+    repo: https://charts.chainguard.dev/
+    chart: rabbitmq-cluster-operator
     version: ""
-    set:
-      - "replicaCount=1"
-      - "persistence.enabled=false"
-      - "auth.username=admin"
-      - "auth.password=adminpassword"
-      - "auth.erlangCookie=deployguard-static-cookie-2026"
-      - "readinessProbe.initialDelaySeconds=120"
-      - "livenessProbe.initialDelaySeconds=120"
+  # 3b. RABBITMQ INSTANCE (Local DeployGuard Custom Resource)
+  - name: rabbitmq
+    repo: http://host.k3d.internal:8081
+    chart: rabbitmq-instance
+    version: "0.1.0"
   # 4. POSTGRES (Bitnami - TCP Data Service)
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
@@ -99,6 +98,7 @@ services:
       - redis
       - elasticsearch
       - minio
+      - rabbitmq-operator
       - rabbitmq
       - vault
     env:
@@ -135,6 +135,7 @@ services:
     depends_on:
       - postgres
       - minio
+      - rabbitmq-operator
       - rabbitmq
       - vault
     env:

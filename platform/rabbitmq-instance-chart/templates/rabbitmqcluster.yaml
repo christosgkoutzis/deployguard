@@ -1,0 +1,26 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  override:
+    env:
+      - name: RABBITMQ_DEFAULT_USER
+        value: "admin"
+      - name: RABBITMQ_DEFAULT_PASS
+        value: "adminpassword"
+  rabbitmq:
+    additionalConfig: |
+      vm_memory_high_watermark.relative = 0.4
+  persistence:
+    storageClassName: ""
+    storage: 0Gi
+  resourceInjections:
+    - jsonPatch:
+        - op: replace
+          path: /spec/template/spec/volumes/0
+          value:
+            name: rabbitmq-data
+            emptyDir: {}

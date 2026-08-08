@@ -3,11 +3,16 @@ import time
 import json
 import boto3
 import csv
+import pika
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
+from botocore.config import Config
 
 DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
-LOCALSTACK_URL = os.getenv("LOCALSTACK_URL", "http://localstack-service:4566")
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+RABBITMQ_USER = os.getenv("AWS_ACCESS_KEY_ID", "admin")
+RABBITMQ_PASS = os.getenv("AWS_SECRET_ACCESS_KEY", "adminpassword")
 
 engine = create_engine(DB_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -20,17 +25,15 @@ class Greeting(Base):
     status = Column(String)
     created_at = Column(DateTime)
 
-sqs = boto3.client('sqs', endpoint_url=LOCALSTACK_URL, region_name='us-east-1')
-s3 = boto3.client('s3', endpoint_url=LOCALSTACK_URL, region_name='us-east-1')
+# MinIO client with strict PATH-STYLE addressing to avoid K8s DNS failures
+s3_config = Config(s3={'addressing_style': 'path'})
+s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, region_name=os.getenv('AWS_DEFAULT_REGION', 'us-east-1'), config=s3_config)
 
-def ensure_aws_resources():
+def ensure_s3_bucket():
     try:
         s3.create_bucket(Bucket='reports-bucket')
-        q = sqs.create_queue(QueueName='report-tasks')
-        return q['QueueUrl']
     except Exception as e:
-        print(f"WARN: Waiting for LocalStack... {e}")
-        return None
+        print(f"WARN: Bucket might already exist or MinIO not ready: {e}")
 
 def process_report():
     db = SessionLocal()
@@ -45,28 +48,42 @@ def process_report():
             writer.writerow([g.id, g.greeting, g.status, g.created_at])
     
     s3.upload_file(filepath, 'reports-bucket', 'greetings_report.csv')
-    print("INFO: CSV Report uploaded to S3 successfully.")
+    print("INFO: CSV Report uploaded to MinIO successfully.")
 
 def run_worker():
     print("INFO: Report Worker starting...")
-    queue_url = None
-    while not queue_url:
-        queue_url = ensure_aws_resources()
-        time.sleep(5)
+    time.sleep(15) # Give MinIO time to initialize
+    ensure_s3_bucket()
 
-    print("INFO: Listening for SQS tasks...")
-    while True:
-        response = sqs.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=1, WaitTimeSeconds=5)
-        messages = response.get('Messages', [])
-        
-        for msg in messages:
-            print("INFO: Received task from SQS.")
-            try:
-                process_report()
-                sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=msg['ReceiptHandle'])
-                print("INFO: Task completed and deleted from SQS.")
-            except Exception as e:
-                print(f"ERROR: Failed to process report: {e}")
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+    
+    connection = None
+    while not connection:
+        try:
+            connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
+        except Exception as e:
+            print(f"WARN: Waiting for RabbitMQ... {e}")
+            time.sleep(5)
+
+    channel = connection.channel()
+    channel.queue_declare(queue='report-tasks', durable=True)
+
+    def callback(ch, method, properties, body):
+        print("INFO: Received task from RabbitMQ.")
+        try:
+            process_report()
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            print("INFO: Task completed and ACK sent.")
+        except Exception as e:
+            print(f"ERROR: Failed to process report: {e}")
+            # Requeue on failure
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+
+    channel.basic_qos(prefetch_count=1)
+    channel.basic_consume(queue='report-tasks', on_message_callback=callback)
+
+    print("INFO: Listening for RabbitMQ tasks...")
+    channel.start_consuming()
 
 if __name__ == "__main__":
     run_worker()

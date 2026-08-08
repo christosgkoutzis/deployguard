@@ -37,7 +37,7 @@ jobs:
           MOCK_APP_NAMES="${MOCKS}" \
           ./scripts/verify.sh
 
-      - name: E2E Functional Validation (Kafka, Redis, ES, SQS, S3)
+      - name: E2E Functional Validation (Kafka, Redis, ES, RabbitMQ, MinIO)
         run: |
           echo "INFO: Triggering a new greeting write..."
           curl -s -X POST -H "Content-Type: application/json" -d '{"greeting": "Hello from CI validation"}' http://python-backend.127.0.0.1.nip.io:8080/db/write
@@ -77,18 +77,18 @@ jobs:
 
           echo "SUCCESS: E2E Flow (Kafka, Redis, ES) completed successfully!"
           
-          echo "INFO: Triggering Enterprise CSV Report generation (SQS & S3)..."
+          echo "INFO: Triggering CSV Report generation (RabbitMQ & MinIO)..."
           curl -s -X POST http://python-backend.127.0.0.1.nip.io:8080/report/generate
           
-          echo "INFO: Waiting for report worker to process SQS and upload to S3..."
+          echo "INFO: Waiting for report worker to process RabbitMQ and upload to MinIO..."
           sleep 10
           
           echo "INFO: Validating report download link..."
           DOWNLOAD_RES=$(curl -s http://python-backend.127.0.0.1.nip.io:8080/report/download)
           if [[ "$DOWNLOAD_RES" == *"download_url"* ]]; then
-            echo "SUCCESS: Enterprise Report generated and S3 presigned URL verified!"
+            echo "SUCCESS: Enterprise Report generated and MinIO presigned URL verified!"
           else
-            echo "ERROR: Report generation failed or LocalStack not responding. Result: $DOWNLOAD_RES"
+            echo "ERROR: Report generation failed or RabbitMQ/MinIO not responding. Result: $DOWNLOAD_RES"
             exit 1
           fi
 
@@ -109,7 +109,8 @@ jobs:
 
           echo "INFO: Recent deployguard logs..."
           kubectl -n deployguard logs --all-containers=true --tail=120 --prefix=true -l app.kubernetes.io/instance=kafka || true
-          kubectl -n deployguard logs --all-containers=true --tail=120 --prefix=true -l app.kubernetes.io/name=localstack || true
+          kubectl -n deployguard logs --all-containers=true --tail=120 --prefix=true -l app.kubernetes.io/name=rabbitmq || true
+          kubectl -n deployguard logs --all-containers=true --tail=120 --prefix=true -l app.kubernetes.io/name=minio || true
           kubectl -n deployguard logs --all-containers=true --tail=80 --prefix=true -l app || true
 
           echo "INFO: Recent deployguard events..."

@@ -12,17 +12,30 @@ dependencies:
       - "server.ingress.enabled=true"
       - "server.ingress.ingressClassName=traefik"
       - "server.ingress.hosts[0].host=vault.127.0.0.1.nip.io"
-  # 2. LOCALSTACK (AWS Mocks: S3, SQS)
-  - name: localstack
-    repo: https://localstack.github.io/helm-charts
-    chart: localstack
-    version: "0.6.14"
+  # 2. MINIO (Open-Source S3 Alternative)
+  - name: minio
+    repo: https://charts.bitnami.com/bitnami
+    chart: minio
+    version: ""
     set:
+      - "auth.rootUser=admin"
+      - "auth.rootPassword=adminpassword"
+      - "mode=standalone"
       - "persistence.enabled=false"
-      - "ingress.enabled=true"
-      - "ingress.ingressClassName=traefik"
-      - "ingress.hosts[0].host=localstack.127.0.0.1.nip.io"
-  # 3. POSTGRES (Bitnami - TCP Data Service)
+  # 3. RABBITMQ (Enterprise AMQP Queue)
+  - name: rabbitmq
+    repo: https://charts.bitnami.com/bitnami
+    chart: rabbitmq
+    version: ""
+    set:
+      - "replicaCount=1"
+      - "persistence.enabled=false"
+      - "auth.username=admin"
+      - "auth.password=adminpassword"
+      - "auth.erlangCookie=deployguard-static-cookie-2026"
+      - "readinessProbe.initialDelaySeconds=120"
+      - "livenessProbe.initialDelaySeconds=120"
+  # 4. POSTGRES (Bitnami - TCP Data Service)
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
@@ -38,7 +51,7 @@ dependencies:
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
 
-  # 2. KAFKA (Local DeployGuard KRaft Chart)
+  # 5. KAFKA (Local DeployGuard KRaft Chart)
   - name: kafka
     repo: http://host.k3d.internal:8081
     chart: confluent-kafka
@@ -47,7 +60,7 @@ dependencies:
       - "image.tag=8.0.6"
       - "heapOpts=-Xms256m -Xmx256m"
 
-  # 3. REDIS (Bitnami - TCP Data Service)
+  # 6. REDIS (Bitnami - TCP Data Service)
   - name: redis
     repo: https://charts.bitnami.com/bitnami
     chart: redis
@@ -58,7 +71,7 @@ dependencies:
       - "master.persistence.size=100Mi"
       - "master.resources.limits.memory=128Mi"
 
-  # 4. ELASTICSEARCH (DeployGuard Universal Chart - HTTP Data Service)
+  # 7. ELASTICSEARCH (DeployGuard Universal Chart - HTTP Data Service)
   - name: elasticsearch
     repo: http://host.k3d.internal:8081
     chart: universal-chart
@@ -85,9 +98,18 @@ services:
       - kafka
       - redis
       - elasticsearch
+      - minio
+      - rabbitmq
+      - vault
     env:
       - INIT_COMMAND="python migrate.py"
       - ES_HOST="http://elasticsearch-service:9200"
+      - VAULT_URL="http://vault:8200"
+      - S3_ENDPOINT="http://minio:9000"
+      - AWS_ACCESS_KEY_ID="admin"
+      - AWS_SECRET_ACCESS_KEY="adminpassword"
+      - AWS_DEFAULT_REGION="us-east-1"
+      - RABBITMQ_HOST="rabbitmq"
     resources:
       limits:
         memory: 256Mi
@@ -112,11 +134,13 @@ services:
     type: worker
     depends_on:
       - postgres
-      - localstack
+      - minio
+      - rabbitmq
       - vault
     env:
-      - AWS_ACCESS_KEY_ID="test"
-      - AWS_SECRET_ACCESS_KEY="test"
+      - VAULT_URL="http://vault:8200"
+      - S3_ENDPOINT="http://minio:9000"
+      - AWS_ACCESS_KEY_ID="admin"
+      - AWS_SECRET_ACCESS_KEY="adminpassword"
       - AWS_DEFAULT_REGION="us-east-1"
-      - LOCALSTACK_URL="http://localstack-service:4566"
-      - VAULT_URL="http://vault-service:8200"
+      - RABBITMQ_HOST="rabbitmq"

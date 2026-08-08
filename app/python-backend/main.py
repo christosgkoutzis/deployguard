@@ -12,6 +12,8 @@ import redis
 from elasticsearch import Elasticsearch
 import hvac
 import boto3
+import pika
+from botocore.config import Config
 
 # Vault Graceful Fallback Helper
 def get_secret(path, key, default_env_val):
@@ -98,9 +100,14 @@ def read_db():
     except Exception as e:
         return {"error": str(e)}
 
-LOCALSTACK_URL = os.getenv("LOCALSTACK_URL", "http://localstack-service:4566")
-sqs = boto3.client('sqs', endpoint_url=LOCALSTACK_URL, region_name='us-east-1')
-s3 = boto3.client('s3', endpoint_url=LOCALSTACK_URL, region_name='us-east-1')
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
+# Strict config to prevent virtual-hosted K8s DNS failures with MinIO
+s3_config = Config(s3={'addressing_style': 'path'})
+s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, region_name=os.getenv('AWS_DEFAULT_REGION', 'us-east-1'), config=s3_config)
+
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+RABBITMQ_USER = os.getenv("AWS_ACCESS_KEY_ID", "admin")
+RABBITMQ_PASS = os.getenv("AWS_SECRET_ACCESS_KEY", "adminpassword")
 
 @app.post("/db/write")
 async def write_db(request: Request):
@@ -138,11 +145,21 @@ def search(q: str):
 @app.post("/report/generate")
 def generate_report():
     try:
-        q = sqs.create_queue(QueueName='report-tasks')
-        sqs.send_message(QueueUrl=q['QueueUrl'], MessageBody=json.dumps({"task": "export_csv"}))
-        return {"status": "Task sent to SQS"}
+        # Ephemeral connection to avoid thread-pool safety issues in FastAPI
+        credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
+        channel = connection.channel()
+        channel.queue_declare(queue='report-tasks', durable=True)
+        channel.basic_publish(
+            exchange='',
+            routing_key='report-tasks',
+            body=json.dumps({"task": "export_csv"}),
+            properties=pika.BasicProperties(delivery_mode=2)
+        )
+        connection.close()
+        return {"status": "Task sent to RabbitMQ"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"RabbitMQ Error: {str(e)}"}
 
 @app.get("/report/download")
 def download_report():

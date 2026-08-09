@@ -114,8 +114,10 @@ dependencies:
       - "resources.requests.memory=64Mi"
       - "resources.limits.memory=128Mi"
       - "ingress.enabled=true"
-      - "ingress.ingressClassName=traefik"
+      - "ingress.className=traefik"
       - "ingress.hosts[0].host=dozzle.127.0.0.1.nip.io"
+      - "ingress.hosts[0].paths[0].path=/"
+      - "ingress.hosts[0].paths[0].pathType=Prefix"
       
 mocks:
   - external-api-mock

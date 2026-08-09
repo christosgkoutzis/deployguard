@@ -99,10 +99,36 @@ DeployGuard natively supports different architectural patterns via the `type` fi
 * `webservice` (Default): Creates a Deployment, an internal Service, an Ingress route, and enforces HTTP readiness probes.
 * `worker`: Creates only a Deployment. Ideal for background processors, queue consumers, or async tasks that do not expose web ports.
 
+### Initialization & Data Seeding
+
+DeployGuard strictly separates Infrastructure State from Application Data. It provides two distinct seeding mechanisms to ensure a clean Separation of Concerns.
+
+#### 1. Platform Seeds (Infrastructure State)
+Use these for initializing cluster-level dependencies (e.g., seeding HashiCorp Vault secrets, creating complex Kafka topics, or configuring RabbitMQ vhosts).
+*   **Location:** Place your scripts in `platform/seeds/` (e.g., `platform/seeds/seed_vault.py`).
+*   **How it works:** The orchestrator dynamically packages this directory into a global Kubernetes `ConfigMap` during deployment[cite: 1].
+*   **Execution:** These files are mounted read-only inside your service's initialization container at `/platform-seeds/`[cite: 1].
+
+#### 2. Service Seeds (Application Data)
+Use these for inserting dummy data, default users, or database schema migrations specific to your microservice.
+*   **Location:** Place your scripts directly inside your microservice directory, e.g., `app/<service-name>/` (e.g., `app/python-backend/seed_db.py`).
+*   **How it works:** These files are naturally built into your service's Docker image.
+*   **Execution:** They are executed directly from your application's working directory.
+
+#### How to Trigger Them (The Chain)
+Developers can trigger both Platform and Service seeds sequentially by defining an `INIT_COMMAND` inside the `deployguard.yaml`[cite: 1]. This command runs in an ephemeral Kubernetes Job before the main application starts.
+
+**Example from test scenario `deployguard.yaml`:**
+```yaml
+    env:
+      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
+      - INIT_COMMAND="python /platform-seeds/seed_vault.py && python migrate.py && python seed_db.py"
+
 ### Customizing Environment Variables & Init Jobs
 DeployGuard supports a flexible, hybrid approach for injecting configuration into your services:
 1. **Inline Overrides (`env`):** Best for platform-specific commands (like `INIT_COMMAND` to run database migrations before the service starts) or simple variables.
 2. **External Files (`env_file`):** Best for standard application environment variables. You can point this to `.env.development`, `.env.local`, or any custom env file residing inside the service directory (e.g., `env_file: .env.local`).
+```
 
 ## 4) Sync Environment
 

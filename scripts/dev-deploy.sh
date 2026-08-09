@@ -235,6 +235,9 @@ done
 if [[ -d "${REPO_ROOT}/platform/universal-chart" ]]; then
   helm package "${REPO_ROOT}/platform/universal-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
 fi
+if [[ -d "${REPO_ROOT}/platform/charts/platform-seeds-chart" ]]; then
+  helm package "${REPO_ROOT}/platform/charts/platform-seeds-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
+fi
 if [[ -d "${REPO_ROOT}/platform/confluent-kafka-chart" ]]; then
   helm package "${REPO_ROOT}/platform/confluent-kafka-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
 fi

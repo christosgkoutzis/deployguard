@@ -7,8 +7,18 @@ import pika
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from botocore.config import Config
+import hvac
 
-DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
+VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
+DB_URL = os.getenv("DB_URL")
+try:
+    client = hvac.Client(url=VAULT_URL, token="deployguard-root-token")
+    if client.is_authenticated():
+        res = client.secrets.kv.v2.read_secret_version(path='deployguard/python-backend')
+        DB_URL = res['data']['data'].get('DB_URL', DB_URL)
+except Exception:
+    pass
+
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 RABBITMQ_USER = os.getenv("AWS_ACCESS_KEY_ID", "admin")

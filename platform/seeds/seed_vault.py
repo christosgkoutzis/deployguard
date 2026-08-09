@@ -1,0 +1,43 @@
+import os
+import hvac
+import time
+
+VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
+TOKEN = "deployguard-root-token"
+
+print(f"INFO: Connecting to Vault at {VAULT_URL} for seeding...")
+client = hvac.Client(url=VAULT_URL, token=TOKEN)
+
+retries = 10
+while retries > 0:
+    try:
+        if client.is_authenticated():
+            print("INFO: Vault authenticated. Proceeding with seed.")
+            break
+    except Exception:
+        pass
+    print(f"WARN: Vault not ready... ({retries} retries left)")
+    retries -= 1
+    time.sleep(3)
+
+if not client.is_authenticated():
+    print("ERROR: Failed to authenticate with Vault.")
+    exit(1)
+
+# Seed Vault secrets for the python-backend
+secret_data = {
+    'AWS_ACCESS_KEY_ID': 'admin',
+    'AWS_SECRET_ACCESS_KEY': 'adminpassword',
+    'DB_URL': 'postgresql://postgres:secretpassword@postgres:5432/postgres',
+    'SEEDED_BY': 'DeployGuard Platform'
+}
+
+try:
+    client.secrets.kv.v2.create_or_update_secret(
+        path='deployguard/python-backend',
+        secret=secret_data
+    )
+    print("INFO: Successfully seeded Vault secrets at 'deployguard/python-backend'.")
+except Exception as e:
+    print(f"ERROR: Failed to write secret: {e}")
+    exit(1)

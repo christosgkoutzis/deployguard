@@ -20,6 +20,10 @@ spec:
         imagePullPolicy: Never
         command: ["/bin/sh", "-c"]
         args: [{{ .Values.initCommand | quote }}]
+        volumeMounts:
+        - name: seeds-volume
+          mountPath: /platform-seeds/
+          readOnly: true
         {{- if .Values.env }}
         env:
         {{- range $key, $val := .Values.env }}
@@ -27,4 +31,9 @@ spec:
           value: {{ $val | quote }}
         {{- end }}
         {{- end }}
+      volumes:
+      - name: seeds-volume
+        configMap:
+          name: deployguard-platform-seeds
+          optional: true
 {{- end }}

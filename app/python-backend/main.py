@@ -16,17 +16,21 @@ import pika
 from botocore.config import Config
 
 # Vault Graceful Fallback Helper
-def get_secret(path, key, default_env_val):
+def get_secret(path, key, default_env_val=None):
     try:
-        client = hvac.Client(url=os.getenv("VAULT_URL", "http://vault-service:8200"), token="deployguard-root-token")
+        client = hvac.Client(url=os.getenv("VAULT_URL", "http://vault:8200"), token="deployguard-root-token")
         if client.is_authenticated():
             res = client.secrets.kv.v2.read_secret_version(path=path)
             return res['data']['data'].get(key, default_env_val)
-    except Exception:
-        pass # TODO: seed the vault, fallbacks to env for now
+    except Exception as e:
+        print(f"WARN: Vault fetch failed: {e}")
     return default_env_val
+
 APP_NAME = os.getenv("APP_NAME", "python-backend")
-DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
+DB_URL = get_secret('deployguard/python-backend', 'DB_URL', os.getenv("DB_URL"))
+if not DB_URL:
+    raise ValueError("FATAL: DB_URL not found in ENV or Vault!")
+
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL", "http://external-api-mock-service:80")
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis-master")

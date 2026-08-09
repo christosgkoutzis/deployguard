@@ -1,11 +1,27 @@
 import os
 import time
+import hvac
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base
 
-DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
-engine = create_engine(DB_URL)
+print("INFO: Fetching DB_URL securely from Vault for migrations...")
+VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
+TOKEN = "deployguard-root-token"
+db_url = os.getenv("DB_URL")
+
+try:
+    client = hvac.Client(url=VAULT_URL, token=TOKEN)
+    if client.is_authenticated():
+        res = client.secrets.kv.v2.read_secret_version(path='deployguard/python-backend')
+        db_url = res['data']['data'].get('DB_URL', db_url)
+except Exception as e:
+    print(f"WARN: Could not fetch from Vault: {e}")
+
+if not db_url:
+    raise ValueError("FATAL: DB_URL is missing!")
+
+engine = create_engine(db_url)
 Base = declarative_base()
 
 class Greeting(Base):

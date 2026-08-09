@@ -143,11 +143,72 @@ for dep in $(echo "$DEPS" | tr ',' '\n'); do
   "${CMD[@]}"
 done
 
-# 3. Trigger Deployment
+# 3 Scaffold Platform Seeds (Dynamic ConfigMap)
+echo "INFO: === Scaffolding Platform Seeds ==="
+SEEDS_DIR="${REPO_ROOT}/platform/seeds"
+if [[ -d "${SEEDS_DIR}" ]] && [[ -n "$(ls -A "${SEEDS_DIR}" 2>/dev/null)" ]]; then
+  echo "INFO: Found platform seeds. Generating dynamic ConfigMap chart..."
+  SEED_CHART_DIR="${REPO_ROOT}/platform/charts/platform-seeds-chart"
+  mkdir -p "${SEED_CHART_DIR}/templates"
+  
+  cat > "${SEED_CHART_DIR}/Chart.yaml" <<EOF
+apiVersion: v2
+name: platform-seeds-chart
+version: 0.1.0
+description: Dynamic platform seeds ConfigMap
+type: application
+EOF
+
+  cat > "${SEED_CHART_DIR}/templates/configmap.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deployguard-platform-seeds
+data:
+EOF
+
+  for seed_file in "${SEEDS_DIR}"/*; do
+    if [[ -f "${seed_file}" ]]; then
+      echo "  $(basename "${seed_file}"): |" >> "${SEED_CHART_DIR}/templates/configmap.yaml"
+      sed 's/^/    /' "${seed_file}" >> "${SEED_CHART_DIR}/templates/configmap.yaml"
+      printf '\n' >> "${SEED_CHART_DIR}/templates/configmap.yaml"
+    fi
+  done
+
+  # Create ArgoCD App for seeds
+  cat > "${REPO_ROOT}/platform/gitops/platform-seeds.yaml" <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-seeds
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://host.k3d.internal:8081
+    chart: platform-seeds-chart
+    targetRevision: 0.1.0
+    helm:
+      releaseName: platform-seeds
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: deployguard
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+EOF
+fi
+
+# 4. Trigger Deployment
 echo "INFO: === Triggering Strict GitOps Deployment ==="
 
 # Safely join the variables (remove redundant commas)
 ALL_APPS=$(echo "${DEPS},${SERVICES},${MOCKS}" | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
+
+if [[ -d "${SEEDS_DIR}" ]] && [[ -n "$(ls -A "${SEEDS_DIR}" 2>/dev/null)" ]]; then
+  ALL_APPS="platform-seeds,${ALL_APPS}"
+  DEPS="platform-seeds,${DEPS}"
+fi
 
 # Active Pruning: Delete ArgoCD apps that are no longer in focus to free up RAM
 echo "INFO: === Pruning out-of-focus applications ==="

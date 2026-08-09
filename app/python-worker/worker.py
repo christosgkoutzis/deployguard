@@ -5,8 +5,18 @@ import json
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from confluent_kafka import Consumer, KafkaException
+import hvac
 
-DB_URL = os.getenv("DB_URL", "postgresql://postgres:secretpassword@postgres:5432/postgres")
+VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
+DB_URL = os.getenv("DB_URL")
+try:
+    client = hvac.Client(url=VAULT_URL, token="deployguard-root-token")
+    if client.is_authenticated():
+        res = client.secrets.kv.v2.read_secret_version(path='deployguard/python-backend')
+        DB_URL = res['data']['data'].get('DB_URL', DB_URL)
+except Exception:
+    pass
+
 VALIDATE_URL = os.getenv("VALIDATE_URL", "http://external-api-mock-service:80/api/validate")
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 

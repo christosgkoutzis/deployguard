@@ -133,7 +133,8 @@ services:
       - rabbitmq
       - vault
     env:
-      - INIT_COMMAND="python migrate.py"
+      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
+      - INIT_COMMAND="python /platform-seeds/seed_vault.py && python migrate.py && python seed_db.py"
       - ES_HOST="http://elasticsearch-service:9200"
       - VAULT_URL="http://vault:8200"
       - S3_ENDPOINT="http://minio:9000"
@@ -158,8 +159,10 @@ services:
       - kafka
       - external-api-mock
       - elasticsearch
+      - vault
     env:
       - ES_HOST="http://elasticsearch-service:9200"
+      - VAULT_URL="http://vault:8200"
 
   - name: report-worker
     type: worker

@@ -4,28 +4,23 @@ This document defines exactly when `scripts/add-service.sh` is expected to gener
 
 If a service meets all requirements below and still fails in local cluster deployment with DeployGuard scripts, it is considered a repository bug.
 
-## Required Service Location
-
-1. Service code must live in `app/<service-name>/`.
+## Required Service Location & Files
+1. By default, service code and its `Dockerfile` are expected in `app/<service-name>/`. You can now place your code anywhere by defining a custom `build_path` in your topology YAML.
 2. `<service-name>` must be lowercase, alphanumeric, and hyphen only.
 
-## Required Files
-
-1. `app/<service-name>/Dockerfile`
-
 ## Required Runtime Shape
-
 1. Single container HTTP service.
-2. Service must expose a health endpoint path provided to scaffold input.
+2. Service must expose a health endpoint path defined in the topology (or default `/health`).
 3. Service may optionally be stateful (creates a StatefulSet) if it requires a PVC mount, but must still expose HTTP health.
 
 ## Required Build/Deploy Assumptions
-
-1. Docker image can be built locally from `app/<service-name>/`.
+1. The Docker image can be built locally using the provided `build_path` (or default `app/` folder).
 2. Service listens on a single main HTTP port and is reachable through Kubernetes Service mapping.
-3. Scaffold supports defaults and optional overrides:
-   - defaults: image repo `<service-name>`, image tag `v1`, container port `8000`, service port `80`, health path `/health`
-   - overrides: CLI flags (including `--storage-size`, `--storage-mount`) and optional `app/<service-name>/service.contract.env`
+3. Scaffold uses the following defaults, which can be dynamically overridden in your topology YAML:
+   - Container Port: Defaults to `8000`. Override with `port: <number>`.
+   - Health Check: Defaults to `/health`. Override with `health_endpoint: "<path>"`.
+   - Service Port: Fixed at `80`.
+   - Overrides: CLI flags (including `--storage-size`, `--storage-mount`) and optional `service.contract.env` (or custom `env_file` defined in YAML).
 
 ## Supported Technology Scope
 

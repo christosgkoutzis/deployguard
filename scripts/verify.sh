@@ -7,8 +7,9 @@ NAMESPACE="${NAMESPACE:-deployguard}"
 RELEASE_NAMES="${RELEASE_NAMES:-}"
 HEALTH_PATH="${HEALTH_PATH:-/health}"
 EXTERNAL_DEPS="${EXTERNAL_DEPS:-}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-for cmd in kubectl curl; do
+for cmd in kubectl curl yq; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: Missing command '$cmd'"
     exit 1
@@ -36,11 +37,6 @@ if [[ -z "${RELEASE_NAMES// }" ]]; then
   echo "INFO: Auto-detected RELEASE_NAMES=${RELEASE_NAMES}"
 fi
 
-if [[ "${HEALTH_PATH}" != /* ]]; then
-  echo "ERROR: HEALTH_PATH must start with '/'"
-  exit 1
-fi
-
 IFS=',' read -r -a RELEASE_LIST <<< "${RELEASE_NAMES}"
 for release in "${RELEASE_LIST[@]}"; do
   release_name="${release// /}"
@@ -59,10 +55,16 @@ for release in "${RELEASE_LIST[@]}"; do
       fi
     done
   fi
+  
+  TOPOLOGY_FILE="${TOPOLOGY_FILE:-${REPO_ROOT}/deployguard.yaml}"
+  local_health_path=$(yq ".services[] | select(.name == \"${release_name}\") | .health_endpoint // \"${HEALTH_PATH}\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g')
+  [[ -z "$local_health_path" || "$local_health_path" == "null" ]] && local_health_path="${HEALTH_PATH}"
 
-  local_health_path="${HEALTH_PATH}"
   if [[ "${is_mock}" == "true" ]]; then
     local_health_path="/__admin/"
+  elif [[ "${local_health_path}" != /* ]]; then
+    echo "ERROR: health_endpoint '${local_health_path}' for service '${release_name}' must start with '/'"
+    exit 1
   fi
 
   echo "INFO: Checking PVCs for ${release_name} (if applicable)"

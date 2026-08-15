@@ -204,9 +204,17 @@ for app_name in "${SANITIZED_APPS[@]}"; do
   done
   [[ "${is_mock}" == "true" ]] && continue
 
-  app_context="${REPO_ROOT}/app/${app_name}"
+  TOPOLOGY_FILE="${TOPOLOGY_FILE:-${REPO_ROOT}/deployguard.yaml}"
+  CUSTOM_BUILD_PATH=$(yq ".services[] | select(.name == \"${app_name}\") | .build_path // \"\"" "${TOPOLOGY_FILE}" 2>/dev/null | sed 's/"//g')
+
+  if [[ -n "$CUSTOM_BUILD_PATH" && "$CUSTOM_BUILD_PATH" != "null" && "$CUSTOM_BUILD_PATH" != "" ]]; then
+    app_context="${REPO_ROOT}/${CUSTOM_BUILD_PATH}"
+  else
+    app_context="${REPO_ROOT}/app/${app_name}"
+  fi
+
   if [[ ! -d "${app_context}" ]]; then
-    echo "ERROR: App directory not found: app/${app_name}"
+    echo "ERROR: App directory not found: ${app_context}"
     exit 1
   fi
 
@@ -312,6 +320,7 @@ else
     VERIFY_RELEASE_NAMES="$(IFS=','; echo "${release_list[*]}")"
   fi
 
+  TOPOLOGY_FILE="${TOPOLOGY_FILE:-${REPO_ROOT}/deployguard.yaml}" \
   RELEASE_NAMES="${VERIFY_RELEASE_NAMES}" \
   MOCK_APP_NAMES="${MOCK_APP_NAMES:-}" \
   HEALTH_PATH="${HEALTH_PATH:-/health}" \

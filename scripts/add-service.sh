@@ -7,16 +7,29 @@ shift || true
 
 IMAGE_REPO="${SERVICE_NAME}"
 IMAGE_TAG="v1"
-CONTAINER_PORT="8000"
 SERVICE_PORT="80"
-HEALTH_PATH="/health"
 NAMESPACE="deployguard"
 PERSISTENCE_ENABLED="false"
 STORAGE_SIZE=""
 STORAGE_MOUNT="/data"
-APP_DIR="${REPO_ROOT}/app/${SERVICE_NAME}"
-GITOPS_FILE="${REPO_ROOT}/platform/gitops/${SERVICE_NAME}.yaml"
 
+TOPOLOGY_FILE="${TOPOLOGY_FILE:-${REPO_ROOT}/deployguard.yaml}"
+YQ_BASE=".services[] | select(.name == \"$SERVICE_NAME\")"
+
+CONTAINER_PORT=$(yq "$YQ_BASE | .port // 8000" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g' || echo "8000")
+CONTAINER_PORT="${CONTAINER_PORT:-8000}"
+
+HEALTH_PATH=$(yq "$YQ_BASE | .health_endpoint // \"/health\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g' || echo "/health")
+HEALTH_PATH="${HEALTH_PATH:-/health}"
+CUSTOM_BUILD_PATH=$(yq "$YQ_BASE | .build_path // \"\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g')
+
+if [[ -n "$CUSTOM_BUILD_PATH" && "$CUSTOM_BUILD_PATH" != "null" && "$CUSTOM_BUILD_PATH" != "" ]]; then
+  APP_DIR="${REPO_ROOT}/${CUSTOM_BUILD_PATH}"
+else
+  APP_DIR="${REPO_ROOT}/app/${SERVICE_NAME}"
+fi
+
+GITOPS_FILE="${REPO_ROOT}/platform/gitops/${SERVICE_NAME}.yaml"
 mkdir -p "${REPO_ROOT}/platform/gitops"
 
 if [[ -z "${SERVICE_NAME}" ]]; then
@@ -29,7 +42,7 @@ declare -A ENV_VARS
 ENV_VARS["APP_NAME"]="${SERVICE_NAME}"
 
 # A. Read custom env_file if declared in deployguard.yaml
-ENV_FILE=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .env_file" "$REPO_ROOT/deployguard.yaml" 2>/dev/null | grep -v "null" || true)
+ENV_FILE=$(yq "$YQ_BASE | .env_file" "$TOPOLOGY_FILE" 2>/dev/null | grep -v "null" || true)
 if [[ -n "$ENV_FILE" && -f "$APP_DIR/$ENV_FILE" ]]; then
   while IFS='=' read -r key value; do
     [[ $key =~ ^#.*$ ]] || [[ -z $key ]] && continue
@@ -39,10 +52,10 @@ if [[ -n "$ENV_FILE" && -f "$APP_DIR/$ENV_FILE" ]]; then
 fi
 
 # B. Read inline overrides from deployguard.yaml
-ENV_LEN=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .env | length" "$REPO_ROOT/deployguard.yaml" 2>/dev/null || echo 0)
+ENV_LEN=$(yq "$YQ_BASE | .env | length" "$TOPOLOGY_FILE" 2>/dev/null || echo 0)
 if [[ "$ENV_LEN" =~ ^[0-9]+$ ]] && [[ "$ENV_LEN" -gt 0 ]]; then
   for i in $(seq 0 $((ENV_LEN-1))); do
-    KV=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .env[$i]" "$REPO_ROOT/deployguard.yaml")
+    KV=$(yq "$YQ_BASE | .env[$i]" "$TOPOLOGY_FILE")
     key="${KV%%=*}"
     value="${KV#*=}"
     value=$(echo "$value" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
@@ -53,9 +66,8 @@ fi
 INIT_COMMAND="${ENV_VARS[INIT_COMMAND]:-}"
 unset ENV_VARS[INIT_COMMAND] # Remove from standard env list so it's not injected into the app container
 
-RESOURCES_YAML=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .resources" "$REPO_ROOT/deployguard.yaml" 2>/dev/null | grep -v "null" || true)
-
-WORKLOAD_TYPE=$(yq ".services[] | select(.name == \"$SERVICE_NAME\") | .type" "$REPO_ROOT/deployguard.yaml" 2>/dev/null | grep -v "null" || true)
+RESOURCES_YAML=$(yq "$YQ_BASE | .resources" "$TOPOLOGY_FILE" 2>/dev/null | grep -v "null" || true)
+WORKLOAD_TYPE=$(yq "$YQ_BASE | .type" "$TOPOLOGY_FILE" 2>/dev/null | grep -v "null" || true)
 WORKLOAD_TYPE="${WORKLOAD_TYPE:-webservice}"
 
 # 2. Build the Values block for the Universal Chart

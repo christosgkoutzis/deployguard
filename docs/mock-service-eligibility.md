@@ -25,8 +25,9 @@ If a mock service meets the requirements below and fails to deploy via the local
 3. Scaffolding of a sample JSON endpoint to ensure the directory is not empty.
 
 ## Execution Requirements
+Mock services are injected declaratively. You no longer need to pass environment variables manually. Add the mock to the `mocks` array in your topology YAML:
 
-Mock services are not auto-detected. To inject a mock service into the deployment lifecycle, pass its name to the `MOCK_APP_NAMES` environment variable when running the deployment script:
+    mocks:
+      - external-api-mock
 
-```bash
-MOCK_APP_NAMES=external-api-mock ARGO_APP_NAMES=... ./scripts/dev-deploy.sh
+The orchestrator script automatically parses this and handles the GitOps injection.

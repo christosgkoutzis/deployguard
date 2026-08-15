@@ -129,23 +129,34 @@ DeployGuard supports a flexible, hybrid approach for injecting configuration int
 1. **Inline Overrides (`env`):** Best for platform-specific commands (like `INIT_COMMAND` to run database migrations before the service starts) or simple variables.
 2. **External Files (`env_file`):** Best for standard application environment variables. You can point this to `.env.development`, `.env.local`, or any custom env file residing inside the service directory (e.g., `env_file: .env.local`).
 ```
-
 ## 4) Sync Environment
-
 Apply your topology with a single command:
 
-```bash
-# Deploy the entire environment
-./scripts/sync-env.sh
+    # Deploy the entire default environment
+    ./scripts/sync-env.sh
 
-# OR: Deploy a focused subset of the environment
-./scripts/sync-env.sh --focus ruby-gateway
-```
+    # Deploy an isolated Topology profile (Squad Bubbles)
+    ./scripts/sync-env.sh --topology topologies/payments.yaml
+
+    # Deploy a focused subset of the environment
+    ./scripts/sync-env.sh --topology topologies/payments.yaml --focus ruby-gateway
 
 This Orchestrator script will automatically parse your YAML, scaffold everything using the Universal Helm Chart, build the necessary Docker images, and trigger a strict GitOps deployment via ArgoCD.
 
-The --focus Flag:
-By using --focus <service-name>, DeployGuard reads the depends_on graph in your YAML and deploys only the requested service plus its recursive dependencies. This saves local CPU/RAM by skipping unrelated workloads. For example, focusing on `ruby-gateway` still deploys `python-backend`, PostgreSQL, and Kafka because they are required by the dependency graph, but it skips `python-worker` and `external-api-mock`.
+**The --topology Flag:**
+If your repository grows large, teams can create their own isolated environment profiles (e.g., `topologies/payments.yaml`) instead of loading the entire `deployguard.yaml`.
+
+**The --focus Flag:**
+By using `--focus <service-name>`, DeployGuard reads the `depends_on` graph in your YAML and deploys only the requested service plus its recursive dependencies. This saves local CPU/RAM by skipping unrelated workloads.
+
+### Dynamic Service Configuration
+You do not have to conform to the default `app/` folder, port `8000`, or `/health`. You can define them explicitly per service in your YAML:
+
+    services:
+      - name: legacy-api
+        build_path: "./backend/legacy-api"
+        port: 3000
+        health_endpoint: "/api/status"
 
 ## 5) Run Verification
 

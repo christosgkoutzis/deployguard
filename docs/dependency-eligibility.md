@@ -14,7 +14,7 @@ The script generates a raw ArgoCD Application definition and optionally a Kubern
 ## Required Assumptions & Constraints
 1. **No App Code:** Dependencies deployed via this script cannot have local source code in `app/`. They are platform dependencies, not DeployGuard application services.
 2. **Chart Source:** Dependencies may use remote Helm charts or committed platform charts that `dev-deploy.sh` packages into the local Helm repository. The Confluent Kafka KRaft chart and the RabbitMQ Instance chart are examples of local platform charts.
-3. **Platform Layer:** Dependency names MUST be injected into the deployment lifecycle as `PLATFORM_APPS` in the `dev-deploy.sh` pipeline to prevent the build system from searching for a local Dockerfile.
+3. **Platform Layer:** Dependencies MUST be declared strictly under the `dependencies:` block in your topology YAML. The platform automatically separates them from local services to prevent the build system from searching for a local Dockerfile.
 4. **Init Jobs:** If a dependency requires schema initialization (e.g., a database), the microservice consuming it MUST define an `INIT_COMMAND` in its service environment. The platform wraps this command in a Kubernetes Job with a Helm hook, executing it before the microservice starts.
 
 ## Built-In Local Kafka

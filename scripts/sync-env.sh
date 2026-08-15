@@ -3,14 +3,17 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 YAML_FILE="${REPO_ROOT}/deployguard.yaml"
-
 FOCUS_SERVICE=""
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --topology) YAML_FILE="$2"; shift 2 ;;
     --focus) FOCUS_SERVICE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument '$1'"; exit 1 ;;
   esac
 done
+
+export TOPOLOGY_FILE="${YAML_FILE}"
 
 if [[ ! -f "$YAML_FILE" ]]; then
   echo "ERROR: Environment file $YAML_FILE not found!"
@@ -231,5 +234,6 @@ cat <<EOF > "${REPO_ROOT}/.sync-env.env"
 export SERVICES="${SERVICES}"
 export MOCKS="${MOCKS}"
 export EXTERNAL_DEPS="${DEPS}"
+export TOPOLOGY_FILE="${TOPOLOGY_FILE}"
 EOF
 echo "INFO: Environment synced successfully!"

@@ -32,12 +32,17 @@ done
 echo "INFO: Streaming logs from ${POD_NAME}..."
 kubectl -n deployguard logs -f "$POD_NAME"
 
-EXIT_CODE=$(kubectl -n deployguard get pod "$POD_NAME" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || echo "1")
-
-if [[ "$EXIT_CODE" == "0" ]]; then
-  echo "SUCCESS: Test suite passed!"
-  exit 0
-else
-  echo "ERROR: Test suite failed with exit code ${EXIT_CODE}"
-  exit 1
-fi
+echo "INFO: Waiting for pod status to finalize..."
+while true; do
+  PHASE=$(kubectl -n deployguard get pod "$POD_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+  
+  if [[ "$PHASE" == "Succeeded" ]]; then
+    echo "SUCCESS: Test suite passed!"
+    exit 0
+  elif [[ "$PHASE" == "Failed" ]]; then
+    echo "ERROR: Test suite failed!"
+    exit 1
+  fi
+  
+  sleep 1
+done

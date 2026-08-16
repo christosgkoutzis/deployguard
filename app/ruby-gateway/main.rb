@@ -132,10 +132,10 @@ helpers do
     "Backend unavailable: #{e.message}"
   end
 
-  def fetch_mocked_greeting
+ def fetch_mocked_greeting
     uri = URI("#{BACKEND_URL}/mock-greeting")
     response = Net::HTTP.get_response(uri)
-    JSON.parse(response.body)['greeting'] || 'No greeting available'
+    JSON.parse(response.body)['value'] || 'No greeting available'
   rescue => e
     "Mocked API unavailable: #{e.message}"
   end

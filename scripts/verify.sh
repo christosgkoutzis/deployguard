@@ -57,6 +57,11 @@ for release in "${RELEASE_LIST[@]}"; do
   fi
   
   TOPOLOGY_FILE="${TOPOLOGY_FILE:-${REPO_ROOT}/deployguard.yaml}"
+  WORKLOAD_TYPE=$(yq ".services[] | select(.name == \"${release_name}\") | .type // \"webservice\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g')
+  if [[ "${WORKLOAD_TYPE}" == "test" ]]; then
+    echo "INFO: Archetype is 'test'. Skipping HTTP and Rollout checks for ${release_name}."
+    continue
+  fi
   local_health_path=$(yq ".services[] | select(.name == \"${release_name}\") | .health_endpoint // \"${HEALTH_PATH}\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g')
   [[ -z "$local_health_path" || "$local_health_path" == "null" ]] && local_health_path="${HEALTH_PATH}"
 

@@ -9,8 +9,8 @@ If a service meets all requirements below and still fails in local cluster deplo
 2. `<service-name>` must be lowercase, alphanumeric, and hyphen only.
 
 ## Required Runtime Shape
-1. Single container HTTP service.
-2. Service must expose a health endpoint path defined in the topology (or default `/health`).
+1. Single container HTTP service (or ephemeral Job for tests).
+2. Web services must expose a health endpoint path defined in the topology (or default `/health`). Tests do not require health endpoints.
 3. Service may optionally be stateful (creates a StatefulSet) if it requires a PVC mount, but must still expose HTTP health.
 
 ## Required Build/Deploy Assumptions

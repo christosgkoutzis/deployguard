@@ -9,12 +9,12 @@ ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
 ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,sql-database}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-180}"
 SKIP_VERIFY="${SKIP_VERIFY:-false}"
-
 MOCK_MEMORY_LIMIT="${MOCK_MEMORY_LIMIT:-256Mi}"
 MOCK_JAVA_OPTS="${MOCK_JAVA_OPTS:--Xmx128m}"
 EXTERNAL_DEPS="${EXTERNAL_DEPS:-}"
+TOPOLOGY_FILE="${TOPOLOGY_FILE:-${REPO_ROOT}/deployguard.yaml}"
 
-for cmd in docker k3d kubectl; do
+for cmd in docker k3d kubectl yq; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: Missing command '$cmd'"
     exit 1
@@ -204,7 +204,6 @@ for app_name in "${SANITIZED_APPS[@]}"; do
   done
   [[ "${is_mock}" == "true" ]] && continue
 
-  TOPOLOGY_FILE="${TOPOLOGY_FILE:-${REPO_ROOT}/deployguard.yaml}"
   CUSTOM_BUILD_PATH=$(yq ".services[] | select(.name == \"${app_name}\") | .build_path // \"\"" "${TOPOLOGY_FILE}" 2>/dev/null | sed 's/"//g')
 
   if [[ -n "$CUSTOM_BUILD_PATH" && "$CUSTOM_BUILD_PATH" != "null" && "$CUSTOM_BUILD_PATH" != "" ]]; then
@@ -290,6 +289,13 @@ for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
     exit 1
   fi
 
+  WORKLOAD_TYPE=$(yq ".services[] | select(.name == \"${app_name}\") | .type // \"webservice\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g')
+  
+  if [[ "${WORKLOAD_TYPE}" == "test" ]]; then
+    echo "INFO: Archetype is 'test'. Skipping ArgoCD health wait for ${app_name}."
+    continue
+  fi
+
   echo "INFO: Waiting for ArgoCD health status for ${app_name}"
   if ! kubectl -n "${ARGO_APP_NAMESPACE}" wait \
     --for=jsonpath='{.status.health.status}'=Healthy \
@@ -298,7 +304,7 @@ for app_name in "${SANITIZED_APPS[@]}" "${MOCK_APPS_LIST[@]}"; do
     echo "ERROR: ArgoCD health check timed out for ${app_name}. Check the pods: 'kubectl -n deployguard get pods -l app=${app_name}'"
     exit 1
   fi
-done
+done 
 
 echo "INFO: ArgoCD sync completed"
 
@@ -306,7 +312,6 @@ if [[ "${SKIP_VERIFY}" == "true" ]]; then
   echo "INFO: SKIP_VERIFY=true, skipping verification"
 else
   echo "INFO: Running verification"
-  # ... verification logic remains the same ...
   VERIFY_RELEASE_NAMES="${VERIFY_RELEASE_NAMES:-}"
   if [[ -z "${VERIFY_RELEASE_NAMES// }" ]]; then
     release_list=()

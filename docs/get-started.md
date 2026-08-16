@@ -98,6 +98,7 @@ The included Kafka dependency is a lightweight single-node Confluent Kafka KRaft
 DeployGuard natively supports different architectural patterns via the `type` field in your `deployguard.yaml`:
 * `webservice` (Default): Creates a Deployment, an internal Service, an Ingress route, and enforces HTTP readiness probes.
 * `worker`: Creates only a Deployment. Ideal for background processors, queue consumers, or async tasks that do not expose web ports.
+* `test`: Creates a Kubernetes Job. Intended for E2E and Integration test suites that run, evaluate, and terminate.
 
 ### Initialization & Data Seeding
 
@@ -170,7 +171,16 @@ MOCK_APP_NAMES="${MOCKS}" \
 
 Checks rollout, health endpoint, specifically for the apps defined in your topology.
 
-## 6) Validate Service-to-Service Communication
+## 6) Run the E2E Test Suite (Test Runner)
+
+DeployGuard includes a built-in test runner that executes your integration tests directly inside the cluster, ensuring 100% realistic networking.
+Since we defined `e2e-tests` as `type: test` in our topology, simply run:
+
+    ./scripts/run-tests.sh e2e-tests
+
+This script automatically spawns a Kubernetes Job, streams the test output to your terminal, and evaluates the Eventual Consistency of Kafka, Redis, Elasticsearch, and RabbitMQ. It exits with `0` on success.
+
+## 7) Validate Service-to-Service Communication
 
 All services are accessible out-of-the-box via Traefik Ingress on port 8080 using `nip.io` wildcard DNS. No port-forwarding required!
 
@@ -192,7 +202,7 @@ Optional direct Python check:
 curl [http://python-backend.127.0.0.1.nip.io:8080/message](http://python-backend.127.0.0.1.nip.io:8080/message)
 ```
 
-## 7) Check Platform Ecosystem & Observability
+## 8) Check Platform Ecosystem & Observability
 
 You have instant access to multiple Web UIs for cluster management and live debugging, without needing terminal commands:
 

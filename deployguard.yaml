@@ -178,3 +178,11 @@ services:
       - AWS_SECRET_ACCESS_KEY="adminpassword"
       - AWS_DEFAULT_REGION="us-east-1"
       - RABBITMQ_HOST="rabbitmq"
+      
+  - name: e2e-tests
+    type: test
+    depends_on:
+      - ruby-gateway
+      - python-backend
+    env:
+      - TARGET_URL="http://ruby-gateway-service:80"

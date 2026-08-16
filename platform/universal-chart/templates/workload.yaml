@@ -1,3 +1,4 @@
+{{- if ne .Values.workloadType "test" }}
 apiVersion: apps/v1
 {{- if .Values.persistence.enabled }}
 kind: StatefulSet
@@ -59,4 +60,5 @@ spec:
       resources:
         requests:
           storage: {{ .Values.persistence.size }}
+{{- end }}
 {{- end }}

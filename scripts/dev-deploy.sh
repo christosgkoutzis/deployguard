@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-control-plane-cluster}"
 IMAGE_TAG="${IMAGE_TAG:-v1}"
 ARGO_APP_NAMESPACE="${ARGO_APP_NAMESPACE:-argocd}"
-ARGO_APP_NAMES="${ARGO_APP_NAMES:-ruby-gateway,python-backend,sql-database}"
+ARGO_APP_NAMES="${ARGO_APP_NAMES:-}"
 ARGO_SYNC_TIMEOUT_SECONDS="${ARGO_SYNC_TIMEOUT_SECONDS:-180}"
 SKIP_VERIFY="${SKIP_VERIFY:-false}"
 MOCK_MEMORY_LIMIT="${MOCK_MEMORY_LIMIT:-256Mi}"
@@ -64,9 +64,9 @@ if [[ -n "${MOCK_APP_NAMES// }" ]]; then
 fi
 
 for mock_name in "${MOCK_APPS_LIST[@]}"; do
-  MOCK_DIR="${REPO_ROOT}/platform/mocks/${mock_name}"
+  MOCK_DIR="${REPO_ROOT}/mocks/${mock_name}"
   if [[ ! -d "${MOCK_DIR}" ]]; then
-    echo "ERROR: Mock directory not found: platform/mocks/${mock_name}"
+    echo "ERROR: Mock directory not found: mocks/${mock_name}"
     exit 1
   fi
 
@@ -206,10 +206,14 @@ for app_name in "${SANITIZED_APPS[@]}"; do
 
   CUSTOM_BUILD_PATH=$(yq ".services[] | select(.name == \"${app_name}\") | .build_path // \"\"" "${TOPOLOGY_FILE}" 2>/dev/null | sed 's/"//g')
 
+  WORKLOAD_TYPE=$(yq ".services[] | select(.name == \"${app_name}\") | .type // \"webservice\"" "${TOPOLOGY_FILE}" 2>/dev/null | sed 's/"//g')
+  
   if [[ -n "$CUSTOM_BUILD_PATH" && "$CUSTOM_BUILD_PATH" != "null" && "$CUSTOM_BUILD_PATH" != "" ]]; then
     app_context="${REPO_ROOT}/${CUSTOM_BUILD_PATH}"
+  elif [[ "${WORKLOAD_TYPE}" == "test" ]]; then
+    app_context="${REPO_ROOT}/tests/${app_name}"
   else
-    app_context="${REPO_ROOT}/app/${app_name}"
+    app_context="${REPO_ROOT}/services/${app_name}"
   fi
 
   if [[ ! -d "${app_context}" ]]; then
@@ -232,25 +236,12 @@ if [[ ${#IMAGES_TO_IMPORT[@]} -gt 0 ]]; then
   k3d image import "${IMAGES_TO_IMPORT[@]}" -c "${CLUSTER_NAME}"
 fi
 
-echo "INFO: Packaging Helm charts for local distribution..."
-for mock_name in "${MOCK_APPS_LIST[@]}"; do
-  if [[ -d "${REPO_ROOT}/platform/charts/${mock_name}" ]]; then
-    helm package "${REPO_ROOT}/platform/charts/${mock_name}" -d "${REPO_ROOT}/platform/charts" >/dev/null
-  fi
+echo "INFO: Packaging ALL Helm charts for local distribution..."
+find "${REPO_ROOT}/platform" -name "Chart.yaml" | while read -r chart_file; do
+  chart_dir=$(dirname "$chart_file")
+  helm package "$chart_dir" -d "${REPO_ROOT}/platform/charts" >/dev/null
 done
 
-if [[ -d "${REPO_ROOT}/platform/universal-chart" ]]; then
-  helm package "${REPO_ROOT}/platform/universal-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
-fi
-if [[ -d "${REPO_ROOT}/platform/charts/platform-seeds-chart" ]]; then
-  helm package "${REPO_ROOT}/platform/charts/platform-seeds-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
-fi
-if [[ -d "${REPO_ROOT}/platform/confluent-kafka-chart" ]]; then
-  helm package "${REPO_ROOT}/platform/confluent-kafka-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
-fi
-if [[ -d "${REPO_ROOT}/platform/rabbitmq-instance-chart" ]]; then
-  helm package "${REPO_ROOT}/platform/rabbitmq-instance-chart" -d "${REPO_ROOT}/platform/charts" >/dev/null
-fi
 helm repo index "${REPO_ROOT}/platform/charts"
 
 echo "INFO: Starting local Helm repository server..."

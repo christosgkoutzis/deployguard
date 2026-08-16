@@ -133,8 +133,8 @@ services:
       - rabbitmq
       - vault
     env:
-      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
-      - INIT_COMMAND="python /platform-seeds/seed_vault.py && python migrate.py && python seed_db.py"
+     # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
+      - INIT_COMMAND="python /seeds/seed_vault.py && python migrate.py && python seed_db.py"
       - ES_HOST="http://elasticsearch-service:9200"
       - VAULT_URL="http://vault:8200"
       - S3_ENDPOINT="http://minio:9000"
@@ -178,7 +178,7 @@ services:
       - AWS_SECRET_ACCESS_KEY="adminpassword"
       - AWS_DEFAULT_REGION="us-east-1"
       - RABBITMQ_HOST="rabbitmq"
-      
+
   - name: e2e-tests
     type: test
     depends_on:

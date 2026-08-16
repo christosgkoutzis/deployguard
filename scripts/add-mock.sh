@@ -18,10 +18,10 @@ if [[ ! "${MOCK_NAME}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
   exit 1
 fi
 
-MOCK_DIR="${REPO_ROOT}/platform/mocks/${MOCK_NAME}"
+MOCK_DIR="${REPO_ROOT}/mocks/${MOCK_NAME}"
 
 if [[ -d "${MOCK_DIR}" ]]; then
-  echo "ERROR: Mock directory already exists: platform/mocks/${MOCK_NAME}"
+echo "ERROR: Mock directory already exists: mocks/${MOCK_NAME}"
   exit 1
 fi
 
@@ -45,5 +45,5 @@ cat > "${MOCK_DIR}/sample-endpoint.json" <<EOF
 }
 EOF
 
-echo "INFO: Created mock directory: platform/mocks/${MOCK_NAME}"
+echo "INFO: Created mock directory: mocks/${MOCK_NAME}"
 echo "INFO: Edit the JSON files in this directory to define your HTTP mocks."

@@ -148,7 +148,7 @@ done
 
 # 3 Scaffold Platform Seeds (Dynamic ConfigMap)
 echo "INFO: === Scaffolding Platform Seeds ==="
-SEEDS_DIR="${REPO_ROOT}/platform/seeds"
+SEEDS_DIR="${REPO_ROOT}/seeds"
 if [[ -d "${SEEDS_DIR}" ]] && [[ -n "$(ls -A "${SEEDS_DIR}" 2>/dev/null)" ]]; then
   echo "INFO: Found platform seeds. Generating dynamic ConfigMap chart..."
   SEED_CHART_DIR="${REPO_ROOT}/platform/charts/platform-seeds-chart"

@@ -20,7 +20,10 @@ jobs:
         run: ./scripts/bootstrap-platform.sh
 
       - name: Sync Focused Environment
-        run: ./scripts/sync-env.sh --focus ruby-gateway
+        run: |
+          FOCUS_SVC=$(yq '.services[0].name' deployguard.yaml)
+          echo "INFO: Focusing on $FOCUS_SVC"
+          ./scripts/sync-env.sh --focus "$FOCUS_SVC"
 
       - name: Verify Focused Environment
         run: |
@@ -39,8 +42,13 @@ jobs:
 
       - name: E2E Functional Validation (via Test Runner)
         run: |
-          echo "INFO: Running integrated E2E test suite..."
-          ./scripts/run-tests.sh e2e-tests
+          TEST_SVC=$(yq '.services[] | select(.type == "test") | .name' deployguard.yaml | head -n 1)
+          if [[ -n "$TEST_SVC" ]]; then
+            echo "INFO: Running integrated E2E test suite for $TEST_SVC..."
+            ./scripts/run-tests.sh "$TEST_SVC"
+          else
+            echo "INFO: No test workload defined in deployguard.yaml. Skipping."
+          fi
           
       - name: Debug Cluster State On Failure
         if: ${{ failure() }}

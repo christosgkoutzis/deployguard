@@ -22,7 +22,7 @@ spec:
         args: [{{ .Values.initCommand | quote }}]
         volumeMounts:
         - name: seeds-volume
-          mountPath: /platform-seeds/
+          mountPath: /seeds/
           readOnly: true
         {{- if .Values.env }}
         env:

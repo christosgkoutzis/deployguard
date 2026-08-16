@@ -21,15 +21,20 @@ CONTAINER_PORT="${CONTAINER_PORT:-8000}"
 
 HEALTH_PATH=$(yq "$YQ_BASE | .health_endpoint // \"/health\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g' || echo "/health")
 HEALTH_PATH="${HEALTH_PATH:-/health}"
-CUSTOM_BUILD_PATH=$(yq "$YQ_BASE | .build_path // \"\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g')
+WORKLOAD_TYPE=$(yq "$YQ_BASE | .type" "$TOPOLOGY_FILE" 2>/dev/null | grep -v "null" || true)
+WORKLOAD_TYPE="${WORKLOAD_TYPE:-webservice}"
 
+CUSTOM_BUILD_PATH=$(yq "$YQ_BASE | .build_path // \"\"" "$TOPOLOGY_FILE" 2>/dev/null | sed 's/"//g')
 if [[ -n "$CUSTOM_BUILD_PATH" && "$CUSTOM_BUILD_PATH" != "null" && "$CUSTOM_BUILD_PATH" != "" ]]; then
   APP_DIR="${REPO_ROOT}/${CUSTOM_BUILD_PATH}"
+elif [[ "${WORKLOAD_TYPE}" == "test" ]]; then
+  APP_DIR="${REPO_ROOT}/tests/${SERVICE_NAME}"
 else
-  APP_DIR="${REPO_ROOT}/app/${SERVICE_NAME}"
+  APP_DIR="${REPO_ROOT}/services/${SERVICE_NAME}"
 fi
 
 GITOPS_FILE="${REPO_ROOT}/platform/gitops/${SERVICE_NAME}.yaml"
+
 mkdir -p "${REPO_ROOT}/platform/gitops"
 
 if [[ -z "${SERVICE_NAME}" ]]; then

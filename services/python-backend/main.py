@@ -2,7 +2,7 @@ import os
 import time
 import requests
 import datetime
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, BackgroundTasks
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from migrate import Greeting
@@ -18,7 +18,7 @@ from botocore.config import Config
 # Vault Graceful Fallback Helper
 def get_secret(path, key, default_env_val=None):
     try:
-        client = hvac.Client(url=os.getenv("VAULT_URL", "http://vault:8200"), token="deployguard-root-token")
+        client = hvac.Client(url=os.getenv("VAULT_URL", "http://vault:8200"), token=os.getenv("VAULT_ROOT_TOKEN"))
         if client.is_authenticated():
             res = client.secrets.kv.v2.read_secret_version(path=path)
             return res['data']['data'].get(key, default_env_val)
@@ -111,7 +111,7 @@ s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, region_name=os.getenv('AWS_DEF
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 RABBITMQ_USER = os.getenv("AWS_ACCESS_KEY_ID", "admin")
-RABBITMQ_PASS = os.getenv("AWS_SECRET_ACCESS_KEY", "adminpassword")
+RABBITMQ_PASS = os.environ["RABBITMQ_PASSWORD"]
 
 @app.post("/db/write")
 async def write_db(request: Request):
@@ -136,20 +136,9 @@ async def write_db(request: Request):
     except Exception as e:
         return {"error": str(e)}
 
-@app.get("/search")
-def search(q: str):
+def trigger_rabbitmq_export():
+    """Runs in a separate thread so it doesn't block FastAPI's async loop"""
     try:
-        res = es.search(index="greetings", body={"query": {"match": {"greeting": q}}})
-        hits = res['hits']['hits']
-        results = [h['_source'] for h in hits]
-        return {"results": results}
-    except Exception as e:
-        return {"error": f"Elasticsearch Error: {str(e)}"}
-
-@app.post("/report/generate")
-def generate_report():
-    try:
-        # Ephemeral connection to avoid thread-pool safety issues in FastAPI
         credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
         connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
         channel = connection.channel()
@@ -161,9 +150,24 @@ def generate_report():
             properties=pika.BasicProperties(delivery_mode=2)
         )
         connection.close()
-        return {"status": "Task sent to RabbitMQ"}
     except Exception as e:
-        return {"error": f"RabbitMQ Error: {str(e)}"}
+        print(f"ERROR: RabbitMQ Publish Failed: {e}")
+
+@app.get("/search")
+def search(q: str):
+    try:
+        res = es.search(index="greetings", body={"query": {"match": {"greeting": q}}})
+        hits = res['hits']['hits']
+        results = [h['_source'] for h in hits]
+        return {"results": results}
+    except Exception as e:
+        return {"error": f"Elasticsearch Error: {str(e)}"}
+
+@app.post("/report/generate")
+async def generate_report(background_tasks: BackgroundTasks):
+    # Delegate the synchronous blocking call to a background thread
+    background_tasks.add_task(trigger_rabbitmq_export)
+    return {"status": "Task queued successfully in background"}
 
 @app.get("/report/download")
 def download_report():

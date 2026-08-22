@@ -27,6 +27,23 @@ fi
 
 echo "INFO: Syncing Environment from $YAML_FILE..."
 
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  echo "INFO: Securely loading secrets from .env..."
+  set -a
+  source "${REPO_ROOT}/.env"
+  set +a
+else
+  echo "WARN: No .env file found! Make sure you provide one if your topology requires it."
+fi
+
+# Pre-process YAML to safely inject secrets into memory (not disk)
+if command -v envsubst >/dev/null 2>&1; then
+  PROCESSED_YAML=$(mktemp)
+  envsubst < "$YAML_FILE" > "$PROCESSED_YAML"
+  export TOPOLOGY_FILE="${PROCESSED_YAML}"
+  YAML_FILE="${PROCESSED_YAML}"
+fi
+
 # Function to safely read lists from YAML
 parse_list() {
   local query="$1"

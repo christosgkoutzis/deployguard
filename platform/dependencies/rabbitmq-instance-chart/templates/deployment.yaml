@@ -24,9 +24,9 @@ spec:
               command: ["rabbitmqctl", "stop_app"]
         env:
         - name: RABBITMQ_DEFAULT_USER
-          value: "admin"
+          value: {{ default "admin" .Values.auth.username | quote }}
         - name: RABBITMQ_DEFAULT_PASS
-          value: "adminpassword"
+          value: {{ required "A valid RabbitMQ password is required!" .Values.auth.password | quote }}
         - name: RABBITMQ_NODENAME
           value: "rabbit@localhost"
         - name: RABBITMQ_MEM_LIMIT

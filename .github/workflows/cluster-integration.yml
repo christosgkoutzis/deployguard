@@ -19,6 +19,9 @@ jobs:
       - name: Bootstrap Platform
         run: ./scripts/bootstrap-platform.sh
 
+      - name: Inject CI Secrets
+        run: cp .env.example .env
+
       - name: Sync Focused Environment
         run: |
           FOCUS_SVC=$(yq '.services[0].name' deployguard.yaml)

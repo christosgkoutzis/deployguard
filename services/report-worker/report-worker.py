@@ -12,7 +12,7 @@ import hvac
 VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
 DB_URL = os.getenv("DB_URL")
 try:
-    client = hvac.Client(url=VAULT_URL, token="deployguard-root-token")
+    client = hvac.Client(url=VAULT_URL, token=os.getenv("VAULT_ROOT_TOKEN"))
     if client.is_authenticated():
         res = client.secrets.kv.v2.read_secret_version(path='deployguard/python-backend')
         DB_URL = res['data']['data'].get('DB_URL', DB_URL)
@@ -21,8 +21,8 @@ except Exception:
 
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
-RABBITMQ_USER = os.getenv("AWS_ACCESS_KEY_ID", "admin")
-RABBITMQ_PASS = os.getenv("AWS_SECRET_ACCESS_KEY", "adminpassword")
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "admin")
+RABBITMQ_PASS = os.getenv("RABBITMQ_PASSWORD")
 
 engine = create_engine(DB_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

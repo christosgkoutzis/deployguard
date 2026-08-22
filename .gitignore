@@ -1,4 +1,4 @@
 # Generated service deployment artifacts (created by scripts/add-service.sh)
 platform/charts/*
 platform/gitops/*.yaml
-
+.env

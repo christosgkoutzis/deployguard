@@ -10,7 +10,7 @@ import hvac
 VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
 DB_URL = os.getenv("DB_URL")
 try:
-    client = hvac.Client(url=VAULT_URL, token="deployguard-root-token")
+    client = hvac.Client(url=VAULT_URL, token=os.getenv("VAULT_ROOT_TOKEN"))
     if client.is_authenticated():
         res = client.secrets.kv.v2.read_secret_version(path='deployguard/python-backend')
         DB_URL = res['data']['data'].get('DB_URL', DB_URL)

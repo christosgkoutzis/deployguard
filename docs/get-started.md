@@ -34,20 +34,20 @@ dependencies:
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
-    version: ""
+    version: "<SOME_VERSION>"
     secret: 
-      name: my-postgres-secret
+      name: <MY_KEY_VALUE>
       key_values:
-        - "postgres-password=secretpassword"
+        - "<SOME_KEY>=<SOME_VALUE>"
     set:
-      - "auth.existingSecret=my-postgres-secret"
+      - "auth.someproperty=my-postgres-value"
 
 services:
   - name: sample-api
     depends_on:
       - postgres
     env:
-      - DB_PASS="secretpassword"
+      - SOME_KEY="some_value"
 ```
 
 *For an advanced, enterprise-grade architecture example, see the [Test Scenario](test-scenario.md).*

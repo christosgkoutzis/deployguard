@@ -6,7 +6,7 @@ from migrate import Greeting
 
 print("INFO: Fetching DB_URL from Vault...")
 VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
-TOKEN = "deployguard-root-token"
+TOKEN = os.getenv("VAULT_ROOT_TOKEN")
 db_url = os.getenv("DB_URL")
 
 try:

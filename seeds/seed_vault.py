@@ -3,9 +3,10 @@ import hvac
 import time
 
 VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
-TOKEN = "deployguard-root-token"
+TOKEN = os.getenv("VAULT_ROOT_TOKEN")
 
 print(f"INFO: Connecting to Vault at {VAULT_URL} for seeding...")
+
 client = hvac.Client(url=VAULT_URL, token=TOKEN)
 
 retries = 10
@@ -27,8 +28,8 @@ if not client.is_authenticated():
 # Seed Vault secrets for the python-backend
 secret_data = {
     'AWS_ACCESS_KEY_ID': 'admin',
-    'AWS_SECRET_ACCESS_KEY': 'adminpassword',
-    'DB_URL': 'postgresql://postgres:secretpassword@postgres:5432/postgres',
+    'AWS_SECRET_ACCESS_KEY': os.getenv('MINIO_ROOT_PASSWORD'),
+    'DB_URL': f"postgresql://postgres:{os.getenv('POSTGRES_PASSWORD')}@postgres:5432/postgres",
     'SEEDED_BY': 'DeployGuard Platform'
 }
 

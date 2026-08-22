@@ -7,22 +7,22 @@ dependencies:
     set:
       - "injector.enabled=false"
       - "server.dev.enabled=true"
-      - "server.dev.devRootToken=deployguard-root-token"
+      - "server.dev.devRootToken=${VAULT_ROOT_TOKEN}"
       - "ui.enabled=true"
       - "ui.serviceType=ClusterIP"
       - "server.ingress.enabled=true"
       - "server.ingress.ingressClassName=traefik"
       - "server.ingress.hosts[0].host=vault.127.0.0.1.nip.io"
-  # 2. MINIO (Official Open-Source S3)
+ # 2. MINIO (Official Open-Source S3)
   - name: minio
     repo: https://charts.min.io/
     chart: minio
-    version: ""
+    version: "5.3.0"
     set:
       - "mode=standalone"
       - "persistence.enabled=false"
       - "rootUser=admin"
-      - "rootPassword=adminpassword"
+      - "rootPassword=${MINIO_ROOT_PASSWORD}"
       - "resources.requests.memory=256Mi"
       - "resources.requests.cpu=100m"
   # 3. RABBITMQ (Native Local Chart)
@@ -30,15 +30,17 @@ dependencies:
     repo: http://host.k3d.internal:8081
     chart: rabbitmq-instance
     version: "0.1.0"
+    set:
+      - "auth.password=${RABBITMQ_PASSWORD}"
   # 4. POSTGRES (Bitnami - TCP Data Service)
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
-    version: "" 
+    version: "18.8.13"
     secret:
       name: my-postgres-secret
       key_values:
-        - "postgres-password=secretpassword"
+        - "postgres-password=${POSTGRES_PASSWORD}"
     set:
       - "global.postgresql.auth.existingSecret=my-postgres-secret"
       - "auth.existingSecret=my-postgres-secret"
@@ -59,7 +61,7 @@ dependencies:
   - name: redis
     repo: https://charts.bitnami.com/bitnami
     chart: redis
-    version: ""
+    version: "28.0.10"
     set:
       - "architecture=standalone"
       - "auth.enabled=false"
@@ -139,9 +141,12 @@ services:
       - VAULT_URL="http://vault:8200"
       - S3_ENDPOINT="http://minio:9000"
       - AWS_ACCESS_KEY_ID="admin"
-      - AWS_SECRET_ACCESS_KEY="adminpassword"
+      - AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}"
       - AWS_DEFAULT_REGION="us-east-1"
       - RABBITMQ_HOST="rabbitmq"
+      - RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}"
+      - POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
+      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"    
     resources:
       limits:
         memory: 256Mi
@@ -163,6 +168,7 @@ services:
     env:
       - ES_HOST="http://elasticsearch-service:9200"
       - VAULT_URL="http://vault:8200"
+      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"
 
   - name: report-worker
     type: worker
@@ -175,9 +181,11 @@ services:
       - VAULT_URL="http://vault:8200"
       - S3_ENDPOINT="http://minio:9000"
       - AWS_ACCESS_KEY_ID="admin"
-      - AWS_SECRET_ACCESS_KEY="adminpassword"
+      - AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}"
       - AWS_DEFAULT_REGION="us-east-1"
       - RABBITMQ_HOST="rabbitmq"
+      - RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}"
+      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"
 
   - name: e2e-tests
     type: test

@@ -7,7 +7,7 @@ from sqlalchemy.orm import declarative_base
 
 print("INFO: Fetching DB_URL securely from Vault for migrations...")
 VAULT_URL = os.getenv("VAULT_URL", "http://vault:8200")
-TOKEN = "deployguard-root-token"
+TOKEN = os.getenv("VAULT_ROOT_TOKEN")
 db_url = os.getenv("DB_URL")
 
 try:

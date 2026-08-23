@@ -37,13 +37,8 @@ dependencies:
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
     version: "18.8.13"
-    secret:
-      name: my-postgres-secret
-      key_values:
-        - "postgres-password=${POSTGRES_PASSWORD}"
     set:
-      - "global.postgresql.auth.existingSecret=my-postgres-secret"
-      - "auth.existingSecret=my-postgres-secret"
+      - "auth.postgresPassword=${POSTGRES_PASSWORD}"  
       - "architecture=standalone"
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"

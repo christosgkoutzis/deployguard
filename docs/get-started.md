@@ -35,10 +35,6 @@ dependencies:
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
     version: "<SOME_VERSION>"
-    secret: 
-      name: <MY_KEY_VALUE>
-      key_values:
-        - "<SOME_KEY>=<SOME_VALUE>"
     set:
       - "auth.someproperty=my-postgres-value"
 

@@ -13,24 +13,21 @@ Instead of containerizing community tools manually in the application directory,
 3. **Chart Source:** Dependencies may use remote Helm charts or committed local platform charts. Local charts provided by the platform (like Kafka and RabbitMQ) are located in `platform/dependencies/`.
 4. **Init Jobs:** If a dependency requires schema initialization (e.g., a database), the microservice consuming it MUST define an `INIT_COMMAND` using a Seed.
 
-## Usage Example (Secure PostgreSQL)
+## Usage Example (Configuring Dependencies with Credentials)
 
-To provision an external service securely via Kubernetes Secrets, define it in your `deployguard.yaml` like this:
+To provision an external stateful dependency and securely pass its authentication parameters via Helm parameters, define it in your `deployguard.yaml` like this:
 
 ```yaml
 dependencies:
   - name: postgres
-    repo: https://charts.bitnami.com/bitnami
+    repo: [https://charts.bitnami.com/bitnami](https://charts.bitnami.com/bitnami)
     chart: postgresql
-    version: ""
-    secret: 
-      name: my-postgres-secret
-      key_values:
-        - "postgres-password=secretpassword"
+    version: "18.8.13"
     set:
-      - "global.postgresql.auth.existingSecret=my-postgres-secret"
-      - "auth.existingSecret=my-postgres-secret"
+      - "auth.postgresPassword=${POSTGRES_PASSWORD}"
       - "architecture=standalone"
+      - "primary.persistence.size=100Mi"
+      - "fullnameOverride=postgres"
 ```
 
 ## Built-In Local Kafka Design

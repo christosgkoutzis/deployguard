@@ -143,15 +143,6 @@ for dep in $(echo "$DEPS" | tr ',' '\n'); do
   
   CMD=("${REPO_ROOT}/scripts/add-dependency.sh" "$NAME" "--repo" "$REPO" "--chart" "$CHART" "--version" "$VERSION")
   
-  SECRET_NAME=$(yq ".dependencies[] | select(.name == \"$NAME\") | .secret.name" "$YAML_FILE")
-  if [[ "$SECRET_NAME" != "null" ]]; then
-    KV_LEN=$(yq ".dependencies[] | select(.name == \"$NAME\") | .secret.key_values | length" "$YAML_FILE")
-    for k in $(seq 0 $((KV_LEN-1))); do
-      KV=$(yq ".dependencies[] | select(.name == \"$NAME\") | .secret.key_values[$k]" "$YAML_FILE")
-      CMD+=("--secret" "$SECRET_NAME" "$KV")
-    done
-  fi
-  
   SET_LEN=$(yq ".dependencies[] | select(.name == \"$NAME\") | .set | length" "$YAML_FILE")
   if [[ "$SET_LEN" -gt 0 && "$SET_LEN" != "null" ]]; then
     for j in $(seq 0 $((SET_LEN-1))); do

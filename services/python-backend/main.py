@@ -37,8 +37,18 @@ REDIS_HOST = os.getenv("REDIS_HOST", "redis-master")
 ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
 
 kafka_producer = None
-cache = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
-es = Elasticsearch([ES_HOST])
+cache = redis.Redis(
+    host=REDIS_HOST, 
+    port=6379, 
+    db=0, 
+    decode_responses=True, 
+    password=os.environ["REDIS_PASSWORD"]
+)
+
+es = Elasticsearch(
+    [ES_HOST],
+    basic_auth=("elastic", os.environ["ELASTIC_PASSWORD"])
+)
 
 def get_producer():
     global kafka_producer

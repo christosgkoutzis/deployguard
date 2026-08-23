@@ -160,7 +160,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: {{ .Release.Name }}.127.0.0.1.nip.io
+    - host: {{ .Release.Name }}.${CLUSTER_DOMAIN}
       http:
         paths:
           - path: /
@@ -181,7 +181,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: http://host.k3d.internal:8081
+    repoURL: ${LOCAL_REGISTRY}
     chart: ${mock_name}
     targetRevision: 0.1.0
     helm:

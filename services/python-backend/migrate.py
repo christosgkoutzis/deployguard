@@ -2,7 +2,7 @@ import os
 import time
 import hvac
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, text
 from sqlalchemy.orm import declarative_base
 
 print("INFO: Fetching DB_URL securely from Vault for migrations...")
@@ -35,14 +35,24 @@ def migrate():
     retries = 15
     while retries > 0:
         try:
-            Base.metadata.create_all(bind=engine)
-            print("INFO: PostgreSQL schema initialized successfully!")
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS greetings (
+                        id SERIAL PRIMARY KEY,
+                        greeting VARCHAR,
+                        status VARCHAR DEFAULT 'Pending',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_greetings_id ON greetings (id);
+                    CREATE INDEX IF NOT EXISTS ix_greetings_greeting ON greetings (greeting);
+                """))
+            print("INFO: PostgreSQL stateful migration executed successfully!")
             return
         except Exception as e:
-            print(f"WARN: Database not ready yet... ({retries} retries left) Error: {e}")
+            print(f"WARN: Database not ready yet... ({retries} retries left)")
             retries -= 1
             time.sleep(5)
-    print("ERROR: Could not connect to PostgreSQL to run migrations.")
+    print("ERROR: Could not run migrations.")
     exit(1)
 
 if __name__ == "__main__":

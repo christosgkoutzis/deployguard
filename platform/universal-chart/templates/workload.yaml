@@ -34,9 +34,14 @@ spec:
         ports:
         - containerPort: {{ .Values.service.targetPort }}
         readinessProbe:
+          {{- if eq .Values.health.path "tcp" }}
+          tcpSocket:
+            port: {{ .Values.service.targetPort }}
+          {{- else }}
           httpGet:
             path: {{ .Values.health.path }}
             port: {{ .Values.service.targetPort }}
+          {{- end }}
           initialDelaySeconds: 5
         {{- end }}
         {{- if .Values.env }}

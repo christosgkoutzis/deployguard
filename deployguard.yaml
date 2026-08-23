@@ -12,7 +12,7 @@ dependencies:
       - "ui.serviceType=ClusterIP"
       - "server.ingress.enabled=true"
       - "server.ingress.ingressClassName=traefik"
-      - "server.ingress.hosts[0].host=vault.127.0.0.1.nip.io"
+      - "server.ingress.hosts[0].host=vault.${CLUSTER_DOMAIN}"
  # 2. MINIO (Official Open-Source S3)
   - name: minio
     repo: https://charts.min.io/
@@ -27,7 +27,7 @@ dependencies:
       - "resources.requests.cpu=100m"
   # 3. RABBITMQ (Native Local Chart)
   - name: rabbitmq
-    repo: http://host.k3d.internal:8081
+    repo: ${LOCAL_REGISTRY}
     chart: rabbitmq-instance
     version: "0.1.0"
     set:
@@ -50,7 +50,7 @@ dependencies:
 
   # 5. KAFKA (Local DeployGuard KRaft Chart)
   - name: kafka
-    repo: http://host.k3d.internal:8081
+    repo: ${LOCAL_REGISTRY}
     chart: confluent-kafka
     version: "0.1.0"
     set:
@@ -64,13 +64,14 @@ dependencies:
     version: "28.0.10"
     set:
       - "architecture=standalone"
-      - "auth.enabled=false"
+      - "auth.enabled=true"
+      - "auth.password=${REDIS_PASSWORD}"
       - "master.persistence.size=100Mi"
       - "master.resources.limits.memory=128Mi"
 
   # 7. ELASTICSEARCH (DeployGuard Universal Chart - HTTP Data Service)
   - name: elasticsearch
-    repo: http://host.k3d.internal:8081
+    repo: ${LOCAL_REGISTRY}
     chart: universal-chart
     version: "0.1.0"
     set:
@@ -79,10 +80,12 @@ dependencies:
       - "image.tag=8.11.0"
       - "service.port=9200"
       - "service.targetPort=9200"
-      - "health.path=/"
-      - "ingress.host=elasticsearch.127.0.0.1.nip.io"
+      - "health.path=tcp"
+      - "ingress.host=elasticsearch.${CLUSTER_DOMAIN}"
       - "env.ES_SETTING_DISCOVERY_TYPE=single-node"
-      - "env.ES_SETTING_XPACK_SECURITY_ENABLED=false"
+      - "env.ES_SETTING_XPACK_SECURITY_ENABLED=true"
+      - "env.ES_SETTING_XPACK_SECURITY_HTTP_SSL_ENABLED=false"
+      - "env.ELASTIC_PASSWORD=${ELASTIC_PASSWORD}"
       - "env.ES_SETTING_NODE_STORE_ALLOW__MMAP=false"
       - "env.ES_JAVA_OPTS=-Xms512m -Xmx512m"
 
@@ -100,7 +103,7 @@ dependencies:
       - "resources.limits.memory=256Mi"
       - "ingress.enabled=true"
       - "ingress.ingressClassName=traefik"
-      - "ingress.host=kafka-ui.127.0.0.1.nip.io"
+      - "ingress.host=kafka-ui.${CLUSTER_DOMAIN}"
 
   # 9. DOZZLE (Lightweight K8s Log Viewer - Community Chart)
   - name: dozzle
@@ -117,7 +120,7 @@ dependencies:
       - "resources.limits.memory=128Mi"
       - "ingress.enabled=true"
       - "ingress.className=traefik"
-      - "ingress.hosts[0].host=dozzle.127.0.0.1.nip.io"
+      - "ingress.hosts[0].host=dozzle.${CLUSTER_DOMAIN}"
       - "ingress.hosts[0].paths[0].path=/"
       - "ingress.hosts[0].paths[0].pathType=Prefix"
       
@@ -146,7 +149,9 @@ services:
       - RABBITMQ_HOST="rabbitmq"
       - RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}"
       - POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
-      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"    
+      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}" 
+      - REDIS_PASSWORD="${REDIS_PASSWORD}"
+      - ELASTIC_PASSWORD="${ELASTIC_PASSWORD}"   
     resources:
       limits:
         memory: 256Mi
@@ -169,6 +174,7 @@ services:
       - ES_HOST="http://elasticsearch-service:9200"
       - VAULT_URL="http://vault:8200"
       - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"
+      - ELASTIC_PASSWORD="${ELASTIC_PASSWORD}"
 
   - name: report-worker
     type: worker

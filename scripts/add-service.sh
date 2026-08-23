@@ -75,23 +75,36 @@ RESOURCES_YAML=$(yq "$YQ_BASE | .resources" "$TOPOLOGY_FILE" 2>/dev/null | grep 
 WORKLOAD_TYPE=$(yq "$YQ_BASE | .type" "$TOPOLOGY_FILE" 2>/dev/null | grep -v "null" || true)
 WORKLOAD_TYPE="${WORKLOAD_TYPE:-webservice}"
 
-# 2. Build the Values block for the Universal Chart
-VALUES_YAML="workloadType: ${WORKLOAD_TYPE}
+# 2. Build the Values block natively using AST manipulation (SRE standard)
+VALUES_FILE=$(mktemp)
+cat > "$VALUES_FILE" <<EOF
+workloadType: "${WORKLOAD_TYPE}"
 image:
-  repository: ${IMAGE_REPO}
-  tag: ${IMAGE_TAG}
+  repository: "${IMAGE_REPO}"
+  tag: "${IMAGE_TAG}"
 service:
   port: ${SERVICE_PORT}
   targetPort: ${CONTAINER_PORT}
 ingress:
-  host: ${SERVICE_NAME}.127.0.0.1.nip.io
+  host: "${SERVICE_NAME}.${CLUSTER_DOMAIN}"
 health:
-  path: ${HEALTH_PATH}
+  path: "${HEALTH_PATH}"
 persistence:
   enabled: ${PERSISTENCE_ENABLED}
-  size: \"${STORAGE_SIZE}\"
-  mountPath: \"${STORAGE_MOUNT}\"
-initCommand: \"${INIT_COMMAND}\""
+  size: "${STORAGE_SIZE}"
+  mountPath: "${STORAGE_MOUNT}"
+initCommand: "${INIT_COMMAND}"
+EOF
+
+if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
+  for key in "${!ENV_VARS[@]}"; do
+    export ENV_VAL="${ENV_VARS[$key]}"
+    yq -i ".env.\"${key}\" = env(ENV_VAL)" "$VALUES_FILE"
+  done
+fi
+
+VALUES_YAML=$(cat "$VALUES_FILE")
+rm "$VALUES_FILE"
 
 if [[ -n "$RESOURCES_YAML" ]]; then
   VALUES_YAML="${VALUES_YAML}

@@ -100,7 +100,10 @@ def run_worker():
                             from elasticsearch import Elasticsearch
                             ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
                             try:
-                                es = Elasticsearch([ES_HOST])
+                                es = Elasticsearch(
+                                    [ES_HOST],
+                                    basic_auth=("elastic", os.environ["ELASTIC_PASSWORD"])
+                                )
                                 doc = {
                                     "id": pending.id,
                                     "greeting": pending.greeting,

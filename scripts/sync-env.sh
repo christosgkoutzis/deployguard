@@ -205,7 +205,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: http://host.k3d.internal:8081
+    repoURL: ${LOCAL_REGISTRY}
     chart: platform-seeds-chart
     targetRevision: 0.1.0
     helm:

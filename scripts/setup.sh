@@ -13,10 +13,22 @@ install_kubectl() {
         echo "INFO: kubectl is already installed."
         return
     fi
-    echo "INFO: Installing kubectl..."
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    echo "INFO: Installing kubectl v1.28.4..."
+    curl -LO "https://dl.k8s.io/release/v1.28.4/bin/linux/amd64/kubectl"
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
     rm kubectl
+}
+
+install_helm() {
+    if is_installed "helm"; then
+        echo "INFO: helm is already installed."
+        return
+    fi
+    echo "INFO: Installing helm v3.13.3..."
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    DESIRED_VERSION="v3.13.3" ./get_helm.sh
+    rm get_helm.sh
 }
 
 install_k3d() {
@@ -26,15 +38,6 @@ install_k3d() {
     fi
     echo "INFO: Installing k3d..."
     curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.6.0 bash
-}
-
-install_helm() {
-    if is_installed "helm"; then
-        echo "INFO: helm is already installed."
-        return
-    fi
-    echo "INFO: Installing helm..."
-    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 }
 
 install_yq() {

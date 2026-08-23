@@ -15,12 +15,12 @@ jobs:
 
       - name: Setup Tools and Local Cluster
         run: ./scripts/setup.sh
+      
+      - name: Inject CI Secrets
+        run: cp .env.example .env
 
       - name: Bootstrap Platform
         run: ./scripts/bootstrap-platform.sh
-
-      - name: Inject CI Secrets
-        run: cp .env.example .env
 
       - name: Sync Focused Environment
         run: |

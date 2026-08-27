@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-seeder-job
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-vault
+        image: curlimages/curl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Waiting for Vault API..."
+            while ! curl -fsS http://vault.deployguard.svc.cluster.local:8200/v1/sys/health >/dev/null 2>&1; do
+              sleep 2
+            done
+            echo "Vault is ready!"
+      containers:
+      - name: seeder
+        image: python:3.9-slim
+        command: ["/bin/sh", "-c"]
+        args: ["pip install hvac && python /seeds/seed_vault.py"]
+        envFrom:
+        - secretRef:
+            name: platform-bootstrap-secrets
+        {{- if .Values.env }}
+        env:
+        {{- range $key, $val := .Values.env }}
+        - name: {{ $key }}
+          value: {{ $val | quote }}
+        {{- end }}
+        {{- end }}
+        volumeMounts:
+        - name: seeds
+          mountPath: /seeds
+      volumes:
+      - name: seeds
+        configMap:
+          name: deployguard-platform-seeds

@@ -71,6 +71,7 @@ dependencies:
     version: "0.1.0"
     set:
       - "persistence.enabled=false"
+      - "externalSecret.enabled=false"
       - "image.repository=docker.elastic.co/elasticsearch/elasticsearch"
       - "image.tag=8.11.0"
       - "service.port=9200"
@@ -134,19 +135,19 @@ services:
       - vault
     env:
      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
-      - INIT_COMMAND="python migrate.py && python seed_db.py"
-      - ES_HOST="http://elasticsearch-service:9200"
-      - VAULT_URL="http://vault:8200"
-      - S3_ENDPOINT="http://minio:9000"
-      - AWS_ACCESS_KEY_ID="admin"
-      - AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}"
-      - AWS_DEFAULT_REGION="us-east-1"
-      - RABBITMQ_HOST="rabbitmq"
-      - RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}"
-      - POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
-      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}" 
-      - REDIS_PASSWORD="${REDIS_PASSWORD}"
-      - ELASTIC_PASSWORD="${ELASTIC_PASSWORD}"   
+      - INIT_COMMAND=python migrate.py && python seed_db.py
+      - ES_HOST=http://elasticsearch-service:9200
+      - VAULT_URL=http://vault:8200
+      - S3_ENDPOINT=http://minio:9000
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_DEFAULT_REGION=us-east-1
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - VAULT_ROOT_TOKEN=${VAULT_ROOT_TOKEN} 
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}   
     resources:
       limits:
         memory: 256Mi
@@ -155,7 +156,7 @@ services:
     depends_on:
       - python-backend
     env:
-      - BACKEND_URL="http://python-backend-service:80"
+      - BACKEND_URL=http://python-backend-service:80
 
   - name: python-worker
     type: worker
@@ -166,10 +167,10 @@ services:
       - elasticsearch
       - vault
     env:
-      - ES_HOST="http://elasticsearch-service:9200"
-      - VAULT_URL="http://vault:8200"
-      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"
-      - ELASTIC_PASSWORD="${ELASTIC_PASSWORD}"
+      - ES_HOST=http://elasticsearch-service:9200
+      - VAULT_URL=http://vault:8200
+      - VAULT_ROOT_TOKEN=${VAULT_ROOT_TOKEN}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
 
   - name: report-worker
     type: worker
@@ -179,14 +180,14 @@ services:
       - rabbitmq
       - vault
     env:
-      - VAULT_URL="http://vault:8200"
-      - S3_ENDPOINT="http://minio:9000"
-      - AWS_ACCESS_KEY_ID="admin"
-      - AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}"
-      - AWS_DEFAULT_REGION="us-east-1"
-      - RABBITMQ_HOST="rabbitmq"
-      - RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}"
-      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"
+      - VAULT_URL=http://vault:8200
+      - S3_ENDPOINT=http://minio:9000
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_DEFAULT_REGION=us-east-1
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+      - VAULT_ROOT_TOKEN=${VAULT_ROOT_TOKEN}
 
   - name: e2e-tests
     type: test
@@ -194,4 +195,4 @@ services:
       - ruby-gateway
       - python-backend
     env:
-      - TARGET_URL="http://ruby-gateway-service:80"
+      - TARGET_URL=http://ruby-gateway-service:80

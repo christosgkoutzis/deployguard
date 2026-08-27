@@ -46,8 +46,10 @@ install_yq() {
         return
     fi
     echo "INFO: Installing yq..."
-    curl -L "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" -o /usr/local/bin/yq
-    sudo chmod +x /usr/local/bin/yq
+    mkdir -p ~/.local/bin
+    curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o ~/.local/bin/yq
+    chmod +x ~/.local/bin/yq
+    export PATH="$HOME/.local/bin:$PATH"
 }
 
 # Install dependencies

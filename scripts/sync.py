@@ -74,19 +74,6 @@ def create_argocd_app(name, chart, repo_url, values, namespace="deployguard"):
         }
     }
 
-def get_helm_version(repo_url, chart):
-    try:
-        # Add a temporary repo to find the latest version if needed
-        subprocess.run(["helm", "repo", "add", "temp", repo_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["helm", "repo", "update", "temp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        result = subprocess.run(["helm", "search", "repo", f"temp/{chart}"], capture_output=True, text=True)
-        lines = result.stdout.split('\n')
-        if len(lines) > 1:
-            return lines[1].split()[1]
-    except Exception:
-        pass
-    return "0.1.0"
-
 def generate_gitops_manifests(topology, focus=None):
     os.makedirs("platform/gitops", exist_ok=True)
     for f in glob.glob("platform/gitops/*.yaml"):
@@ -113,9 +100,7 @@ def generate_gitops_manifests(topology, focus=None):
 
     # 1. Dependencies
     for dep in deps:
-        version = dep.get('version', '0.1.0')
-        if version == "*" or not version:
-            version = get_helm_version(dep['repo'], dep['chart'])
+        version = dep.get('version', '*')
         
         params = [{"name": s.split('=', 1)[0], "value": s.split('=', 1)[1]} for s in dep.get('set', [])]
         
@@ -123,11 +108,12 @@ def generate_gitops_manifests(topology, focus=None):
             "apiVersion": "argoproj.io/v1alpha1",
             "kind": "Application",
             "metadata": {
-            "annotations": {"argocd.argoproj.io/sync-wave": str(values.pop("syncWave", "3"))},"name": dep['name'], "namespace": "argocd"},
+            "name": dep['name'], "namespace": "argocd", "annotations": {"argocd.argoproj.io/sync-wave": "1"}
+        },
             "spec": {
                 "project": "default",
                 "source": {
-                    "repoURL": dep['repo'],
+                    "repoURL": dep['repo'].replace("${LOCAL_REGISTRY}", local_registry),
                     "chart": dep['chart'],
                     "targetRevision": version,
                     "helm": {
@@ -149,7 +135,7 @@ def generate_gitops_manifests(topology, focus=None):
 
     # 2. Platform Seeds
     if os.path.exists("seeds") and os.listdir("seeds"):
-        seeds_vals = {"seeds": {}, "syncWave": "2", "env": {k: v for k, v in os.environ.items() if k in ["VAULT_ROOT_TOKEN", "POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "RABBITMQ_PASSWORD", "REDIS_PASSWORD", "ELASTIC_PASSWORD"]}}
+        seeds_vals = {"seeds": {}, "syncWave": "2", "env": {}}
         for seed_file in os.listdir("seeds"):
             if os.path.isfile(f"seeds/{seed_file}"):
                 with open(f"seeds/{seed_file}", "r") as sf:

@@ -33,9 +33,9 @@ if [[ ${#IMAGES_TO_IMPORT[@]} -gt 0 ]]; then
 fi
 
 echo "INFO: Packaging Modular Helm charts for local distribution..."
-find "${REPO_ROOT}/platform/charts" -maxdepth 2 -name "Chart.yaml" | while read -r chart_file; do
+find "${REPO_ROOT}/platform/charts" "${REPO_ROOT}/platform/dependencies" -maxdepth 2 -name "Chart.yaml" | while read -r chart_file; do
   chart_dir=$(dirname "$chart_file")
-  helm package "$chart_dir" -d "${REPO_ROOT}/platform/charts-dist" >/dev/null
+  helm package -u "$chart_dir" -d "${REPO_ROOT}/platform/charts-dist" >/dev/null
 done
 helm repo index "${REPO_ROOT}/platform/charts-dist"
 

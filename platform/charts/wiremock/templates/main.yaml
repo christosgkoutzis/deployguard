@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-mocks
+data:
+{{- range $key, $val := .Values.mocks }}
+  {{ $key }}: |
+{{ $val | indent 4 }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-deployment
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+      - name: wiremock
+        image: wiremock/wiremock:3.3.1
+        args: ["--global-response-templating", "--disable-gzip"]
+        env:
+        - name: JAVA_OPTS
+          value: "-Xmx128m"
+        resources:
+          limits:
+            memory: "256Mi"
+          requests:
+            memory: 128Mi
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: mock-data
+          mountPath: /home/wiremock/mappings
+        readinessProbe:
+          httpGet:
+            path: /__admin/
+            port: 8080
+          initialDelaySeconds: 2
+      volumes:
+      - name: mock-data
+        configMap:
+          name: {{ .Release.Name }}-mocks
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-service
+spec:
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ .Release.Name }}.{{ .Values.clusterDomain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-service
+                port:
+                  number: 80

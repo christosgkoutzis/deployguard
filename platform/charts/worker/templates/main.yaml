@@ -1,0 +1,5 @@
+{{- include "common.deployment" . }}
+---
+{{- include "common.externalsecret" . }}
+---
+{{- include "common.initjob" . }}

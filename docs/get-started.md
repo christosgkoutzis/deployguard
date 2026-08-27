@@ -56,14 +56,11 @@ Apply your topology with a single command:
 # Deploy the entire default environment
 ./scripts/sync-env.sh
 
-# Deploy an isolated Topology profile
-./scripts/sync-env.sh --topology topologies/payments.yaml
-
 # Deploy a focused subset of the environment (saves RAM)
 ./scripts/sync-env.sh --focus sample-api
 ```
 
-This Orchestrator script will automatically parse your YAML, scaffold everything using the Universal Helm Chart, build the necessary Docker images, and trigger a strict GitOps deployment via ArgoCD.
+This Orchestrator script will automatically parse your YAML, scaffold everything using modular Helm charts, build the necessary Docker images, and trigger a strict GitOps deployment via ArgoCD.
 
 ## Platform Architecture & Topologies (Under the Hood)
 
@@ -72,7 +69,7 @@ To fully leverage DeployGuard, it helps to understand how it operates behind the
 1. **The Cluster (K3d & Docker):** DeployGuard provisions a lightweight, ephemeral K3s cluster running entirely inside Docker.
 2. **Ingress & Networking (Traefik):** You don't need manual `kubectl port-forward` commands. DeployGuard uses Traefik as an Ingress controller, automatically routing traffic to your web services via `<service-name>.127.0.0.1.nip.io:8080`.
 3. **Local GitOps Server (Nginx):** To strictly adhere to the GitOps methodology, the orchestration script packages your local Helm charts and serves them via an ephemeral Nginx container (`http://host.k3d.internal:8081`). ArgoCD dynamically fetches the manifests from this local server.
-4. **Topologies:** A "Topology" is simply a specific YAML configuration profile. While `deployguard.yaml` is the default monolithic topology, teams can create isolated topologies for specific domains (e.g., `topologies/payments.yaml`). This allows developers to spin up only the exact subset of microservices they need, heavily optimizing local CPU and RAM usage.
+4. **Topologies & Orchestrator:** The `sync.py` orchestrator translates the agnostic `deployguard.yaml` directly into GitOps manifests and modular Helm charts. Developers can spin up only the exact subset of microservices they need using the `--focus` flag, heavily optimizing local CPU and RAM usage.
 
 ## Next Steps
 

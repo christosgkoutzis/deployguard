@@ -9,7 +9,7 @@ print(f"INFO: Connecting to Vault at {VAULT_URL} for seeding...")
 
 client = hvac.Client(url=VAULT_URL, token=TOKEN)
 
-retries = 10
+retries = 5
 while retries > 0:
     try:
         if client.is_authenticated():
@@ -19,7 +19,7 @@ while retries > 0:
         pass
     print(f"WARN: Vault not ready... ({retries} retries left)")
     retries -= 1
-    time.sleep(3)
+    time.sleep(2)
 
 if not client.is_authenticated():
     print("ERROR: Failed to authenticate with Vault.")

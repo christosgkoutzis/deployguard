@@ -46,23 +46,14 @@ kubectl -n deployguard create secret generic vault-token \
     --from-literal=token="${VAULT_ROOT_TOKEN}" \
     --dry-run=client -o yaml | kubectl apply -f -
 
-echo "INFO: Creating ClusterSecretStore..."
-cat <<YAML | kubectl apply -f -
-apiVersion: external-secrets.io/v1beta1
-kind: ClusterSecretStore
-metadata:
-  name: vault-backend
-spec:
-  provider:
-    vault:
-      server: "http://vault.deployguard.svc.cluster.local:8200"
-      path: "deployguard"
-      version: "v2"
-      auth:
-        tokenSecretRef:
-          name: vault-token
-          key: token
-          namespace: deployguard
-YAML
+echo "INFO: Creating Platform Bootstrap Secrets for initial seeding..."
+kubectl -n deployguard create secret generic platform-bootstrap-secrets \
+    --from-literal=VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}" \
+    --from-literal=POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}" \
+    --from-literal=MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-minio123}" \
+    --from-literal=RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-guest}" \
+    --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD:-redis123}" \
+    --from-literal=ELASTIC_PASSWORD="${ELASTIC_PASSWORD:-elastic123}" \
+    --dry-run=client -o yaml | kubectl apply -f -
 
 echo "INFO: Platform Bootstrapped!"

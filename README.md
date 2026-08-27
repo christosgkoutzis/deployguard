@@ -7,7 +7,7 @@
     <img src="https://img.shields.io/badge/ArgoCD-ef7b4d?style=for-the-badge&logo=argo&logoColor=white" alt="argocd">
     <img src="https://img.shields.io/badge/Helm-0f1689?style=for-the-badge&logo=helm&logoColor=white" alt="helm">
     <img src="https://img.shields.io/badge/Docker-2496ed?style=for-the-badge&logo=docker&logoColor=white" alt="docker">
-    <img src="https://img.shields.io/badge/Bash-4Eaa25?style=for-the-badge&logo=gnu-bash&logoColor=white" alt="bash">
+    <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="python">
 </p>
 
 ## Inspiration
@@ -23,7 +23,7 @@ DeployGuard is an internal developer platform that allows teams to spin up an ep
 DeployGuard's main features are:
 
 - **Declarative Topology (`deployguard.yaml`)**: Define your entire ecosystem—services, databases, brokers, and mocks—in a single, easy-to-read configuration file.
-- **Strict GitOps via ArgoCD**: All deployments are managed by ArgoCD reading from a dynamically generated, ephemeral local Helm repository, ensuring 100% parity with modern deployment practices.
+- **Strict GitOps via ArgoCD**: All deployments are managed by ArgoCD reading from dynamically generated local GitOps manifests, ensuring 100% parity with modern deployment practices.
 - **Dependency Graph & Focus Mode**: Intelligent dependency resolution (`depends_on`). Use `--focus <service>` to deploy only what you need, saving local CPU and RAM.
 - **Built-in Mocks & Seeds**: Native support for WireMock HTTP stubs and database initialization scripts, ensuring strict Separation of Concerns between infrastructure state and application data.
 - **Integrated Test Runner**: Spawn ephemeral Kubernetes Jobs to execute E2E and Integration test suites natively inside the cluster's network.

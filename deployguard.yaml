@@ -67,7 +67,7 @@ dependencies:
   # 7. ELASTICSEARCH (DeployGuard Universal Chart - HTTP Data Service)
   - name: elasticsearch
     repo: ${LOCAL_REGISTRY}
-    chart: universal-chart
+    chart: webservice
     version: "0.1.0"
     set:
       - "persistence.enabled=false"
@@ -134,7 +134,7 @@ services:
       - vault
     env:
      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
-      - INIT_COMMAND="python /seeds/seed_vault.py && python migrate.py && python seed_db.py"
+      - INIT_COMMAND="python migrate.py && python seed_db.py"
       - ES_HOST="http://elasticsearch-service:9200"
       - VAULT_URL="http://vault:8200"
       - S3_ENDPOINT="http://minio:9000"

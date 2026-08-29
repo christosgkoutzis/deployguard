@@ -40,7 +40,7 @@ done
 helm repo index "${REPO_ROOT}/platform/charts-dist"
 
 echo "INFO: Starting local Helm repository server..."
-docker stop deployguard-helm-server >/dev/null 2>&1 || true
+docker rm -f deployguard-helm-server >/dev/null 2>&1 || true
 docker run -d --rm --name deployguard-helm-server -p 8081:80 -v "${REPO_ROOT}/platform/charts-dist:/usr/share/nginx/html" nginx:alpine >/dev/null
 
 echo "INFO: Waiting for Helm repository server to be ready..."
@@ -68,10 +68,13 @@ sleep 5 # Give ArgoCD time to register the patch
 for app_yaml in "${REPO_ROOT}/platform/gitops/"*.yaml; do
   app_name=$(basename "$app_yaml" .yaml)
   echo "INFO: Waiting for sync: ${app_name}"
-  kubectl -n "${ARGO_APP_NAMESPACE}" wait \
+  if ! kubectl -n "${ARGO_APP_NAMESPACE}" wait \
     --for=jsonpath='{.status.sync.status}'=Synced \
     "application/${app_name}" \
-    --timeout="${ARGO_SYNC_TIMEOUT_SECONDS}s" || true
+    --timeout="${ARGO_SYNC_TIMEOUT_SECONDS}s"; then
+    echo "ERROR: ArgoCD sync failed for ${app_name}"
+    exit 1
+  fi
 done
 
 echo "INFO: Dev Deploy completed!"

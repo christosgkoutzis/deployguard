@@ -6,13 +6,6 @@ externalSecret:
 image:
   repository: ""
   tag: ""
-service:
-  port: 80
-  targetPort: 8080
-ingress:
-  host: ""
-health:
-  path: "/health"
 resources: {}
 env: {}
 initCommand: ""

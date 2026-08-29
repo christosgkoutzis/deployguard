@@ -96,8 +96,7 @@ def generate_gitops_manifests(topology, focus=None):
     with open(".sync-env.env", "w") as f:
         f.write(f"export SERVICES=\"{','.join(s['name'] for s in services)}\"\n")
         f.write(f"export MOCKS=\"{','.join(mocks)}\"\n")
-        f.write(f"export EXTERNAL_DEPS=\"{','.join(d['name'] for d in deps)}\"\n")
-
+        f.write(f"export EXTERNAL_DEPS=\"{','.join(d['name'] for d in deps)},platform-seeds\"\n")
     # 1. Dependencies
     for dep in deps:
         version = dep.get('version', '*')

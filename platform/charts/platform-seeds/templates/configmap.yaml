@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deployguard-platform-seeds
+data:
+{{- range $key, $val := .Values.seeds }}
+  {{ $key }}: |
+{{ $val | indent 4 }}
+{{- end }}

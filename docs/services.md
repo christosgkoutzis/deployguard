@@ -1,6 +1,6 @@
 # Services & Workers Eligibility Contract
 
-This document defines exactly when the internal scaffolding (`scripts/add-service.sh`) is expected to generate a working Helm chart and ArgoCD Application. If a service meets all requirements below and still fails in local cluster deployment, it is considered a repository bug.
+This document defines exactly when the internal scaffolding (`scripts/sync.py`) is expected to generate a working Helm chart and ArgoCD Application. If a service meets all requirements below and still fails in local cluster deployment, it is considered a repository bug.
 
 ## Required Service Location & Files
 
@@ -18,7 +18,7 @@ DeployGuard natively supports different architectural patterns via the `type` fi
 
 1. Single container HTTP service (or background worker).
 2. Web services must expose a health endpoint path defined in the topology (or default `/health`).
-3. The service may optionally be stateful (creates a `StatefulSet`) if it requires a PVC mount, but it must still expose an HTTP health endpoint.
+3. The service is deployed as a stateless Kubernetes Deployment.
 4. The service must listen on a single main HTTP port and be reachable through K8s Service mapping.
 
 ## Customizing Environment Variables
@@ -43,7 +43,10 @@ services:
 ## Explicitly Unsupported Cases 
 
 1. Multi-container pods or sidecar-dependent workloads.
-2. Stateful services that require complex clustering (e.g., multi-node databases). Single-node HTTP-wrapped stateful services are supported.
+2. Complex stateful clustering (e.g., multi-node databases should be deployed as dependencies instead).
 3. Web services without an HTTP health endpoint.
 4. Complex ingress, mTLS, or custom network policy requirements.
 5. Direct remote Git repository onboarding (input must be a local folder).
+## Secrets Management (ESO)
+
+DeployGuard completely avoids plain text secret injection. Services automatically receive an `ExternalSecret` custom resource. The External Secrets Operator securely synchronizes passwords directly from HashiCorp Vault into the cluster, and standard Kubernetes Secrets are safely mounted into the pods.

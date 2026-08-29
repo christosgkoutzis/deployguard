@@ -1,4 +1,20 @@
 # Generated service deployment artifacts (created by scripts/add-service.sh)
-platform/charts/*
+
 platform/gitops/*.yaml
 .env
+# Helm dependencies
+/charts/
+
+# Helm packaged charts
+platform/charts-dist/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Helm dependency locks and binaries
+Chart.lock
+platform/charts/*/charts/
+
+# Sync script temp files
+.sync-env.env

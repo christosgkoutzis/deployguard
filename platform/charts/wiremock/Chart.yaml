@@ -1,0 +1,9 @@
+apiVersion: v2
+name: wiremock
+version: 0.1.0
+type: application
+description: Wiremock chart for local API mocking
+dependencies:
+  - name: common-library
+    version: 0.1.0
+    repository: file://../common-library

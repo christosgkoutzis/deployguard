@@ -8,7 +8,7 @@ Use platform seeds for initializing cluster-level dependencies. Examples include
 
 *   **Location:** Place your scripts in the root `seeds/` directory (e.g., `seeds/seed_vault.py`).
 *   **How it works:** The orchestrator dynamically packages the contents of this directory into a global Kubernetes `ConfigMap` during the deployment phase.
-*   **Execution:** These files are automatically mounted as read-only inside your service's initialization container at the `/seeds/` path.
+*   **Execution:** The platform utilizes an ArgoCD Sync Wave to run a dedicated `vault-seeder` Kubernetes Job. This runs entirely before your microservices deploy, ensuring all Vault secrets are seeded so the External Secrets Operator can generate the required Kubernetes credentials.
 
 ## 2. Service Seeds (Application Data)
 
@@ -20,7 +20,7 @@ Use service seeds for inserting dummy data, creating default users, or running d
 
 ## How to Trigger Them (The Chain)
 
-Developers can trigger both Platform and Service seeds sequentially by defining an `INIT_COMMAND` environment variable inside the `deployguard.yaml`. 
+Developers trigger Service seeds by defining an `INIT_COMMAND` environment variable inside the `deployguard.yaml`. 
 
 When this command is present, DeployGuard automatically wraps it in an ephemeral Kubernetes `Job` using Helm hooks (`pre-install`, `pre-upgrade`). This ensures that the initialization script completely finishes before the main application pods are allowed to start.
 
@@ -32,6 +32,6 @@ services:
       - postgres
       - vault
     env:
-      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
-      - INIT_COMMAND="python /seeds/seed_vault.py && python migrate.py && python seed_db.py"
+      # 1. App Migration (Tables) -> 2. App Seed (Dummy Data)
+      - INIT_COMMAND="python migrate.py && python seed_db.py"
 ```

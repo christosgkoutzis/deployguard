@@ -1,0 +1,9 @@
+apiVersion: v2
+name: worker
+version: 0.1.0
+type: application
+description: Background worker chart
+dependencies:
+  - name: common-library
+    version: 0.1.0
+    repository: file://../common-library

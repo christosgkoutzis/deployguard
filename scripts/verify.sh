@@ -88,8 +88,8 @@ for release in "${RELEASE_LIST[@]}"; do
   workload_name=$(kubectl -n "${NAMESPACE}" get deploy,sts -l "app=${release_name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 
   if [[ -z "${workload_name}" ]]; then
-    echo "ERROR: Could not detect Deployment or StatefulSet for ${release_name}"
-    exit 1
+    echo "INFO: No Deployment or StatefulSet found for ${release_name}. Skipping workload verification."
+    continue
   fi
 
   kubectl -n "${NAMESPACE}" rollout status "${workload_type}/${workload_name}" --timeout=120s

@@ -9,7 +9,7 @@ print(f"INFO: Connecting to Vault at {VAULT_URL} for seeding...")
 
 client = hvac.Client(url=VAULT_URL, token=TOKEN)
 
-retries = 10
+retries = 5
 while retries > 0:
     try:
         if client.is_authenticated():
@@ -19,26 +19,27 @@ while retries > 0:
         pass
     print(f"WARN: Vault not ready... ({retries} retries left)")
     retries -= 1
-    time.sleep(3)
+    time.sleep(2)
 
 if not client.is_authenticated():
     print("ERROR: Failed to authenticate with Vault.")
     exit(1)
 
-# Seed Vault secrets for the python-backend
-secret_data = {
-    'AWS_ACCESS_KEY_ID': 'admin',
-    'AWS_SECRET_ACCESS_KEY': os.getenv('MINIO_ROOT_PASSWORD'),
-    'DB_URL': f"postgresql://postgres:{os.getenv('POSTGRES_PASSWORD')}@postgres:5432/postgres",
-    'SEEDED_BY': 'DeployGuard Platform'
-}
+services = ["python-backend", "ruby-gateway", "python-worker", "report-worker", "e2e-tests"]
 
-try:
-    client.secrets.kv.v2.create_or_update_secret(
-        path='deployguard/python-backend',
-        secret=secret_data
-    )
-    print("INFO: Successfully seeded Vault secrets at 'deployguard/python-backend'.")
-except Exception as e:
-    print(f"ERROR: Failed to write secret: {e}")
-    exit(1)
+for svc in services:
+    secret_data = {
+        'AWS_ACCESS_KEY_ID': 'admin',
+        'AWS_SECRET_ACCESS_KEY': os.getenv('MINIO_ROOT_PASSWORD', 'minio123'),
+        'DB_URL': f"postgresql://postgres:{os.getenv('POSTGRES_PASSWORD', 'postgres')}@postgres:5432/postgres",
+        'SEEDED_BY': 'DeployGuard Platform'
+    }
+    try:
+        client.secrets.kv.v2.create_or_update_secret(
+            path=f'deployguard/{svc}',
+            secret=secret_data
+        )
+        print(f"INFO: Successfully seeded Vault secrets at 'deployguard/{svc}'.")
+    except Exception as e:
+        print(f"ERROR: Failed to write secret: {e}")
+        exit(1)

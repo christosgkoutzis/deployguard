@@ -1,0 +1,5 @@
+apiVersion: v2
+name: platform-seeds
+version: 0.1.0
+type: application
+description: ConfigMap for platform seeds

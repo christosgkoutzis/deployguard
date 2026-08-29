@@ -164,26 +164,29 @@ def generate_gitops_manifests(topology, focus=None):
                 "repository": svc['name'],
                 "tag": "v1"
             },
-            "service": {
-                "port": 80,
-                "targetPort": svc.get('port', 8000)
-            },
-            "ingress": {
-                "host": f"{svc['name']}.{cluster_domain}"
-            },
-            "health": {
-                "path": svc.get("health_endpoint", "/health")
-            },
             "persistence": {
                 "enabled": False
             },
             "externalSecret": {
                 "enabled": True,
                 "vaultPath": f"deployguard/{svc['name']}"
-            },
-            "env": {},
-            "resources": svc.get('resources', {})
+            }
         }
+        
+        if chart_name not in ['worker', 'test']:
+            vals["service"] = {
+                "port": 80,
+                "targetPort": svc.get('port', 8000)
+            }
+            vals["ingress"] = {
+                "host": f"{svc['name']}.{cluster_domain}"
+            }
+            vals["health"] = {
+                "path": svc.get("health_endpoint", "/health")
+            }
+            
+        vals["env"] = {}
+        vals["resources"] = svc.get('resources', {})
         
 
         env_file = svc.get('env_file')

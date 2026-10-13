@@ -1,5 +1,60 @@
 {{- define "common.labels" -}}
 app: {{ .Release.Name }}
+app.kubernetes.io/name: {{ .Release.Name }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "common.image" -}}
+{{- if .Values.image.ref -}}
+{{- .Values.image.ref -}}
+{{- else -}}
+{{- printf "%s:%s" .Values.image.repository .Values.image.tag -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "common.environment" -}}
+{{- if or .Values.env .Values.secretEnv }}
+env:
+{{- range $key, $val := .Values.env }}
+  - name: {{ $key }}
+    value: {{ $val | quote }}
+{{- end }}
+{{- range $key, $ref := .Values.secretEnv }}
+  - name: {{ $key }}
+    valueFrom:
+      secretKeyRef:
+        name: {{ $ref.name }}
+        key: {{ $ref.key }}
+{{- end }}
+{{- end }}
+{{- if or .Values.envFrom .Values.externalSecret.enabled }}
+envFrom:
+{{- range .Values.envFrom }}
+  - secretRef:
+      name: {{ . }}
+{{- end }}
+{{- if .Values.externalSecret.enabled }}
+  - secretRef:
+      name: {{ .Release.Name }}-secret
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "common.container" -}}
+- name: {{ .Release.Name }}
+  image: {{ include "common.image" . | quote }}
+  imagePullPolicy: IfNotPresent
+  {{- if .Values.command }}
+  command: {{ .Values.command | toJson }}
+  {{- end }}
+  {{- if .Values.args }}
+  args: {{ .Values.args | toJson }}
+  {{- end }}
+  {{- if .Values.resources }}
+  resources:
+    {{- .Values.resources | toYaml | nindent 4 }}
+  {{- end }}
+  {{- include "common.environment" . | nindent 2 }}
 {{- end -}}
 
 {{- define "common.deployment" -}}
@@ -9,49 +64,34 @@ metadata:
   name: {{ .Release.Name }}-workload
   labels:
     {{- include "common.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "common.labels" . | nindent 6 }}
+      app: {{ .Release.Name }}
   template:
     metadata:
       labels:
         {{- include "common.labels" . | nindent 8 }}
     spec:
       containers:
-      - name: {{ .Release.Name }}
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-        imagePullPolicy: IfNotPresent
-        {{- if .Values.resources }}
-        resources:
-{{ toYaml .Values.resources | indent 10 }}
-        {{- end }}
+        {{- include "common.container" . | nindent 8 }}
         {{- if .Values.service }}
-        ports:
-        - containerPort: {{ .Values.service.targetPort }}
-        readinessProbe:
-          {{- if eq (default "http" .Values.health.path) "tcp" }}
-          tcpSocket:
-            port: {{ .Values.service.targetPort }}
-          {{- else }}
-          httpGet:
-            path: {{ default "/health" .Values.health.path }}
-            port: {{ .Values.service.targetPort }}
-          {{- end }}
-          initialDelaySeconds: 5
-        {{- end }}
-        {{- if .Values.env }}
-        env:
-        {{- range $key, $val := .Values.env }}
-        - name: {{ $key }}
-          value: {{ $val | quote }}
-        {{- end }}
-        {{- end }}
-        {{- if .Values.externalSecret.enabled }}
-        envFrom:
-        - secretRef:
-            name: {{ .Release.Name }}-secret
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          readinessProbe:
+            {{- if eq .Values.health.path "tcp" }}
+            tcpSocket:
+              port: {{ .Values.service.targetPort }}
+            {{- else }}
+            httpGet:
+              path: {{ .Values.health.path | quote }}
+              port: {{ .Values.service.targetPort }}
+            {{- end }}
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
         {{- end }}
 {{- end -}}
 
@@ -62,7 +102,7 @@ metadata:
   name: {{ .Release.Name }}-service
 spec:
   selector:
-    {{- include "common.labels" . | nindent 4 }}
+    app: {{ .Release.Name }}
   ports:
     - protocol: TCP
       port: {{ .Values.service.port }}
@@ -77,7 +117,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: {{ .Values.ingress.host }}
+    - host: {{ .Values.ingress.host | quote }}
       http:
         paths:
           - path: /
@@ -90,36 +130,43 @@ spec:
 {{- end -}}
 
 {{- define "common.externalsecret" -}}
-{{- if .Values.externalSecret.enabled -}}
+{{- if .Values.externalSecret.enabled }}
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: {{ .Release.Name }}-secrets
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    {{- if .Values.externalSecret.refreshAfter }}
+    deployguard.io/refresh-after: {{ .Values.externalSecret.refreshAfter | quote }}
+    {{- end }}
 spec:
-  refreshInterval: {{ default "15s" .Values.externalSecret.refreshInterval }}
+  refreshInterval: 15s
   secretStoreRef:
-    name: {{ default "vault-backend" .Values.externalSecret.secretStore }}
-    kind: {{ default "ClusterSecretStore" .Values.externalSecret.secretStoreKind }}
+    name: {{ required "externalSecret.secretStore is required" .Values.externalSecret.secretStore }}
+    kind: {{ default "SecretStore" .Values.externalSecret.secretStoreKind }}
   target:
     name: {{ .Release.Name }}-secret
     creationPolicy: Owner
   dataFrom:
     - extract:
-        key: {{ default (printf "deployguard/%s" .Release.Name) .Values.externalSecret.vaultPath }}
-{{- end -}}
+        key: {{ required "externalSecret.vaultPath is required" .Values.externalSecret.vaultPath | quote }}
+{{- end }}
 {{- end -}}
 
 {{- define "common.initjob" -}}
-{{- if .Values.initCommand -}}
+{{- if .Values.initCommand }}
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ .Release.Name }}-init
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-weight: "-5"
-    helm.sh/hook-delete-policy: hook-succeeded
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.timeout }}
   template:
     metadata:
       labels:
@@ -127,34 +174,17 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-      - name: init-task
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-        imagePullPolicy: Never
-        command: ["/bin/sh", "-c"]
-        args: [{{ .Values.initCommand | quote }}]
-        volumeMounts:
-        - name: seeds-volume
-          mountPath: /seeds/
-          readOnly: true
-        {{- if .Values.env }}
-        env:
-        {{- range $key, $val := .Values.env }}
-        - name: {{ $key }}
-          value: {{ $val | quote }}
-        {{- end }}
-        {{- end }}
-        {{- if .Values.externalSecret.enabled }}
-        envFrom:
-        - secretRef:
-            name: {{ .Release.Name }}-secret
-            optional: true
-        {{- end }}
-      volumes:
-      - name: seeds-volume
-        configMap:
-          name: deployguard-platform-seeds
-          optional: true
-{{- end -}}
+        - name: init-task
+          image: {{ include "common.image" . | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args: [{{ .Values.initCommand | quote }}]
+          {{- if .Values.resources }}
+          resources:
+            {{- .Values.resources | toYaml | nindent 12 }}
+          {{- end }}
+          {{- include "common.environment" . | nindent 10 }}
+{{- end }}
 {{- end -}}
 
 {{- define "common.job" -}}
@@ -164,31 +194,20 @@ metadata:
   name: {{ .Release.Name }}-workload
   labels:
     {{- include "common.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 spec:
+  suspend: {{ .Values.suspended }}
   backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.timeout }}
   template:
     metadata:
       labels:
         {{- include "common.labels" . | nindent 8 }}
+      annotations:
+        deployguard.io/run-id: {{ .Values.runId | quote }}
     spec:
       restartPolicy: Never
       containers:
-        - name: {{ .Release.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: IfNotPresent
-          {{- if .Values.resources }}
-          resources: {{ toYaml .Values.resources | indent 12 }}
-          {{- end }}
-          {{- if .Values.env }}
-          env:
-          {{- range $key, $val := .Values.env }}
-          - name: {{ $key }}
-            value: {{ $val | quote }}
-          {{- end }}
-          {{- end }}
-          {{- if .Values.externalSecret.enabled }}
-          envFrom:
-          - secretRef:
-              name: {{ .Release.Name }}-secret
-            {{- end }}
+        {{- include "common.container" . | nindent 8 }}
 {{- end -}}

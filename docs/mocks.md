@@ -1,28 +1,41 @@
-# Mock Services Eligibility Contract
+# Mock Services
 
-This document defines exactly how DeployGuard supports local ephemeral mock services using WireMock. If a mock service meets the requirements below and fails to deploy via the local cluster scripts, it is considered a repository bug.
+DeployGuard supports local HTTP API mocks through WireMock. Mocks are graph entities managed by ArgoCD.
 
 ## Supported Technology Scope
 
-1. **HTTP/HTTPS APIs Only:** The mock service uses WireMock, meaning it can only simulate RESTful or SOAP endpoints over HTTP.
-2. **No Stateful/Binary Protocols:** You cannot mock raw databases (e.g., PostgreSQL, MySQL) or message brokers. WireMock strictly intercepts HTTP traffic. 
+1. WireMock simulates HTTP APIs, including REST and SOAP requests.
+2. Database, broker, and binary protocols need real dependencies or a purpose-built tool.
+3. Built-in ingress exposes HTTP; topology fields do not configure TLS.
 
-## Required Mock Location
+## Required Mock Location & Files
 
-1. Mock data must live in `mocks/<mock-name>/`.
-2. `<mock-name>` must be lowercase, alphanumeric, and hyphen only.
+Put at least one JSON mapping in `mocks/<name>/`, relative to the topology. Names must be unique lowercase DNS labels of at most 40 characters. Each mapping object must contain `request` and `response`; WireMock checks its detailed mapping semantics at runtime.
 
-## Required Files
+```json
+{
+  "request": {"method": "GET", "url": "/api/greeting"},
+  "response": {
+    "status": 200,
+    "jsonBody": {"message": "Hello from the mocked API!"}
+  }
+}
+```
 
-1. At least one valid WireMock `.json` stub mapping file must exist inside `mocks/<mock-name>/`.
+Mappings are mounted from a ConfigMap. Keep the combined content within Kubernetes ConfigMap limits. Nested fixture directories and large file-backed responses are not supported by the built-in chart.
 
-## Execution Requirements
-
-Mock services are injected declaratively. You no longer need to pass environment variables manually or run scaffolding scripts. Add the mock to the `mocks` array in your topology YAML:
+## Declarative Configuration
 
 ```yaml
 mocks:
   - external-api-mock
+services:
+  - name: sample-api
+    depends_on: [external-api-mock]
+    env:
+      - EXTERNAL_API_URL=http://external-api-mock-service:80
 ```
 
-The orchestrator script automatically parses this, creates the GitOps configuration, and injects your JSON stubs into an ephemeral K8s ConfigMap that mounts directly into the WireMock pod.
+A declared mock is selected in full syncs. Add it to `depends_on` when a service or test also needs it in focus mode. The chart mounts mappings, exposes `<name>-service:80`, and creates ingress at `<name>.<CLUSTER_DOMAIN>`. Verification checks rollout and WireMock's `/__admin/` endpoint.
+
+Edit mappings and sync again. Changed mappings trigger a WireMock rollout so the running server loads them; unchanged mappings keep the current pod. No separate scaffolding command is needed.

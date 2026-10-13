@@ -95,7 +95,7 @@ def run_worker():
                         db.commit()
                         print(f"INFO: Greeting {greeting_id} set to {result}.")
                         
-                        # NEW: Index to Elasticsearch if Approved!
+                        # Approved greetings are indexed in Elasticsearch.
                         if result == "Approved":
                             from elasticsearch import Elasticsearch
                             ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")

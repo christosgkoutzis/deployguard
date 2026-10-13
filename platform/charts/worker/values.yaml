@@ -1,11 +1,17 @@
-# Safe fallback defaults for common-library to prevent Helm nil-pointer crashes
-# Secure by default: externalSecret is enabled
 externalSecret:
-  enabled: true
+  enabled: false
   vaultPath: ""
+  secretStore: ""
+  secretStoreKind: SecretStore
 image:
+  ref: ""
   repository: ""
   tag: ""
 resources: {}
 env: {}
+secretEnv: {}
+envFrom: []
 initCommand: ""
+timeout: 600
+command: []
+args: []

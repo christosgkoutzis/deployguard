@@ -1,3 +1,6 @@
+apiVersion: deployguard/v1
+name: deployguard
+
 dependencies:
   # 1. HASHICORP VAULT (Dev Mode)
   - name: vault
@@ -7,12 +10,23 @@ dependencies:
     set:
       - "injector.enabled=false"
       - "server.dev.enabled=true"
-      - "server.dev.devRootToken=${VAULT_ROOT_TOKEN}"
+      - "server.dev.devRootToken=unused-local-env-placeholder"
       - "ui.enabled=true"
       - "ui.serviceType=ClusterIP"
       - "server.ingress.enabled=true"
       - "server.ingress.ingressClassName=traefik"
       - "server.ingress.hosts[0].host=vault.${CLUSTER_DOMAIN}"
+    values:
+      server:
+        extraArgs: '-dev-root-token-id="$(cat /vault/userconfig/bootstrap/token)"'
+        volumes:
+          - name: bootstrap
+            secret:
+              secretName: vault-bootstrap
+        volumeMounts:
+          - name: bootstrap
+            mountPath: /vault/userconfig/bootstrap
+            readOnly: true
  # 2. MINIO (Official Open-Source S3)
   - name: minio
     repo: https://charts.min.io/
@@ -21,33 +35,30 @@ dependencies:
     set:
       - "mode=standalone"
       - "persistence.enabled=false"
-      - "rootUser=admin"
-      - "rootPassword=${MINIO_ROOT_PASSWORD}"
+      - "existingSecret=minio-bootstrap"
       - "resources.requests.memory=256Mi"
       - "resources.requests.cpu=100m"
   # 3. RABBITMQ (Native Local Chart)
   - name: rabbitmq
-    repo: ${LOCAL_REGISTRY}
-    chart: rabbitmq-instance
-    version: "0.1.0"
+    path: platform/dependencies/rabbitmq-instance-chart
     set:
-      - "auth.password=${RABBITMQ_PASSWORD}"
+      - "auth.existingSecret=platform-bootstrap-secrets"
+      - "auth.passwordKey=RABBITMQ_PASSWORD"
   # 4. POSTGRES (Bitnami - TCP Data Service)
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
     version: "18.8.13"
     set:
-      - "auth.postgresPassword=${POSTGRES_PASSWORD}"  
+      - "auth.existingSecret=platform-bootstrap-secrets"
+      - "auth.secretKeys.adminPasswordKey=POSTGRES_PASSWORD"
       - "architecture=standalone"
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
 
   # 5. KAFKA (Local DeployGuard KRaft Chart)
   - name: kafka
-    repo: ${LOCAL_REGISTRY}
-    chart: confluent-kafka
-    version: "0.1.0"
+    path: platform/dependencies/confluent-kafka-chart
     set:
       - "image.tag=8.0.6"
       - "heapOpts=-Xms256m -Xmx256m"
@@ -60,17 +71,17 @@ dependencies:
     set:
       - "architecture=standalone"
       - "auth.enabled=true"
-      - "auth.password=${REDIS_PASSWORD}"
+      - "auth.existingSecret=platform-bootstrap-secrets"
+      - "auth.existingSecretPasswordKey=REDIS_PASSWORD"
       - "master.persistence.size=100Mi"
       - "master.resources.limits.memory=128Mi"
 
   # 7. ELASTICSEARCH (DeployGuard Universal Chart - HTTP Data Service)
   - name: elasticsearch
-    repo: ${LOCAL_REGISTRY}
-    chart: universal-chart
-    version: "0.1.0"
+    path: platform/charts/webservice
     set:
       - "persistence.enabled=false"
+      - "externalSecret.enabled=false"
       - "image.repository=docker.elastic.co/elasticsearch/elasticsearch"
       - "image.tag=8.11.0"
       - "service.port=9200"
@@ -80,15 +91,17 @@ dependencies:
       - "env.ES_SETTING_DISCOVERY_TYPE=single-node"
       - "env.ES_SETTING_XPACK_SECURITY_ENABLED=true"
       - "env.ES_SETTING_XPACK_SECURITY_HTTP_SSL_ENABLED=false"
-      - "env.ELASTIC_PASSWORD=${ELASTIC_PASSWORD}"
+      - "secretEnv.ELASTIC_PASSWORD.name=platform-bootstrap-secrets"
+      - "secretEnv.ELASTIC_PASSWORD.key=ELASTIC_PASSWORD"
       - "env.ES_SETTING_NODE_STORE_ALLOW__MMAP=false"
       - "env.ES_JAVA_OPTS=-Xms512m -Xmx512m"
 
 # 8. KAFBAT UI (Active Community Fork of Provectus Kafka UI)
   - name: kafbat-ui
+    depends_on: [kafka]
     repo: https://kafbat.github.io/helm-charts
     chart: kafka-ui
-    version: "*"
+    version: "1.6.5"
     set:
       - "envs.config.KAFKA_CLUSTERS_0_NAME=local-kraft"
       - "envs.config.KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092"
@@ -104,7 +117,7 @@ dependencies:
   - name: dozzle
     repo: https://abnerrizzi.github.io/charts/
     chart: dozzle
-    version: "*"
+    version: "0.1.3"
     set:
       - "rbac.create=true"
       - "serviceAccount.create=true"
@@ -118,80 +131,132 @@ dependencies:
       - "ingress.hosts[0].host=dozzle.${CLUSTER_DOMAIN}"
       - "ingress.hosts[0].paths[0].path=/"
       - "ingress.hosts[0].paths[0].pathType=Prefix"
-      
+
 mocks:
   - external-api-mock
 
 services:
   - name: python-backend
     depends_on:
+      - external-api-mock
       - postgres
       - kafka
       - redis
       - elasticsearch
       - minio
       - rabbitmq
-      - vault
+      - vault-backend
+    external_secret:
+      store: vault-backend
+      path: deployguard/python-backend
     env:
      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
-      - INIT_COMMAND="python /seeds/seed_vault.py && python migrate.py && python seed_db.py"
-      - ES_HOST="http://elasticsearch-service:9200"
-      - VAULT_URL="http://vault:8200"
-      - S3_ENDPOINT="http://minio:9000"
-      - AWS_ACCESS_KEY_ID="admin"
-      - AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}"
-      - AWS_DEFAULT_REGION="us-east-1"
-      - RABBITMQ_HOST="rabbitmq"
-      - RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}"
-      - POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
-      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}" 
-      - REDIS_PASSWORD="${REDIS_PASSWORD}"
-      - ELASTIC_PASSWORD="${ELASTIC_PASSWORD}"   
+      - INIT_COMMAND=python migrate.py && python seed_db.py
+      - ES_HOST=http://elasticsearch-service:9200
+      - VAULT_URL=http://vault:8200
+      - S3_ENDPOINT=http://minio:9000
+      - AWS_DEFAULT_REGION=us-east-1
+      - RABBITMQ_HOST=rabbitmq
     resources:
       limits:
         memory: 256Mi
 
+    secret_env:
+      AWS_ACCESS_KEY_ID: {name: platform-bootstrap-secrets, key: MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: {name: platform-bootstrap-secrets, key: MINIO_ROOT_PASSWORD}
+      RABBITMQ_PASSWORD: {name: platform-bootstrap-secrets, key: RABBITMQ_PASSWORD}
+      POSTGRES_PASSWORD: {name: platform-bootstrap-secrets, key: POSTGRES_PASSWORD}
+      VAULT_ROOT_TOKEN: {name: platform-bootstrap-secrets, key: VAULT_ROOT_TOKEN}
+      REDIS_PASSWORD: {name: platform-bootstrap-secrets, key: REDIS_PASSWORD}
+      ELASTIC_PASSWORD: {name: platform-bootstrap-secrets, key: ELASTIC_PASSWORD}
   - name: ruby-gateway
     depends_on:
       - python-backend
     env:
-      - BACKEND_URL="http://python-backend-service:80"
+      - BACKEND_URL=http://python-backend-service:80
 
   - name: python-worker
     type: worker
     depends_on:
+      - python-backend
       - postgres
       - kafka
       - external-api-mock
       - elasticsearch
-      - vault
+      - vault-backend
+    external_secret:
+      store: vault-backend
+      path: deployguard/python-worker
     env:
-      - ES_HOST="http://elasticsearch-service:9200"
-      - VAULT_URL="http://vault:8200"
-      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"
-      - ELASTIC_PASSWORD="${ELASTIC_PASSWORD}"
+      - ES_HOST=http://elasticsearch-service:9200
+      - VAULT_URL=http://vault:8200
 
+    secret_env:
+      VAULT_ROOT_TOKEN: {name: platform-bootstrap-secrets, key: VAULT_ROOT_TOKEN}
+      ELASTIC_PASSWORD: {name: platform-bootstrap-secrets, key: ELASTIC_PASSWORD}
   - name: report-worker
     type: worker
     depends_on:
+      - python-backend
       - postgres
       - minio
       - rabbitmq
-      - vault
+      - vault-backend
+    external_secret:
+      store: vault-backend
+      path: deployguard/report-worker
     env:
-      - VAULT_URL="http://vault:8200"
-      - S3_ENDPOINT="http://minio:9000"
-      - AWS_ACCESS_KEY_ID="admin"
-      - AWS_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}"
-      - AWS_DEFAULT_REGION="us-east-1"
-      - RABBITMQ_HOST="rabbitmq"
-      - RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD}"
-      - VAULT_ROOT_TOKEN="${VAULT_ROOT_TOKEN}"
+      - VAULT_URL=http://vault:8200
+      - S3_ENDPOINT=http://minio:9000
+      - AWS_DEFAULT_REGION=us-east-1
+      - RABBITMQ_HOST=rabbitmq
 
+    secret_env:
+      AWS_ACCESS_KEY_ID: {name: platform-bootstrap-secrets, key: MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: {name: platform-bootstrap-secrets, key: MINIO_ROOT_PASSWORD}
+      RABBITMQ_PASSWORD: {name: platform-bootstrap-secrets, key: RABBITMQ_PASSWORD}
+      VAULT_ROOT_TOKEN: {name: platform-bootstrap-secrets, key: VAULT_ROOT_TOKEN}
   - name: e2e-tests
     type: test
     depends_on:
       - ruby-gateway
       - python-backend
+      - python-worker
+      - report-worker
+      - external-api-mock
     env:
-      - TARGET_URL="http://ruby-gateway-service:80"
+      - TARGET_URL=http://ruby-gateway-service:80
+
+# Explicit local bootstrap Secrets. Values name environment variables, never credentials.
+secrets:
+  - name: platform-bootstrap-secrets
+    values:
+      VAULT_ROOT_TOKEN: VAULT_ROOT_TOKEN
+      POSTGRES_PASSWORD: POSTGRES_PASSWORD
+      MINIO_ROOT_PASSWORD: MINIO_ROOT_PASSWORD
+      MINIO_ROOT_USER: MINIO_ROOT_USER
+      RABBITMQ_PASSWORD: RABBITMQ_PASSWORD
+      REDIS_PASSWORD: REDIS_PASSWORD
+      ELASTIC_PASSWORD: ELASTIC_PASSWORD
+  - name: vault-bootstrap
+    values:
+      token: VAULT_ROOT_TOKEN
+  - name: minio-bootstrap
+    values:
+      rootUser: MINIO_ROOT_USER
+      rootPassword: MINIO_ROOT_PASSWORD
+
+seeds:
+  - name: vault-seeder
+    build_path: seeds/vault-seeder
+    files: seeds/vault-seeder
+    command: [python, /seeds/seed_vault.py]
+    depends_on: [vault]
+    env_from: [platform-bootstrap-secrets]
+
+secret_stores:
+  - name: vault-backend
+    server: http://vault:8200
+    path: secret
+    token_secret: {name: vault-bootstrap, key: token}
+    depends_on: [vault-seeder]

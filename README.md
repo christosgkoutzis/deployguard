@@ -7,56 +7,61 @@
     <img src="https://img.shields.io/badge/ArgoCD-ef7b4d?style=for-the-badge&logo=argo&logoColor=white" alt="argocd">
     <img src="https://img.shields.io/badge/Helm-0f1689?style=for-the-badge&logo=helm&logoColor=white" alt="helm">
     <img src="https://img.shields.io/badge/Docker-2496ed?style=for-the-badge&logo=docker&logoColor=white" alt="docker">
-    <img src="https://img.shields.io/badge/Bash-4Eaa25?style=for-the-badge&logo=gnu-bash&logoColor=white" alt="bash">
+    <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="python">
 </p>
 
 ## Inspiration
 
-Local development for complex, event-driven microservices is traditionally painful. Developers struggle with heavy `docker-compose` files, mismatched production configurations, and manual dependency setups. DeployGuard was inspired by the need to bridge the gap between local environments and production Kubernetes, providing Platform Engineering standards right on the developer's machine.
+Local development for complex, event-driven microservices is traditionally painful. Developers struggle with heavy docker-compose files, mismatched configurations, and manual dependency setups. DeployGuard brings familiar Kubernetes and platform engineering workflows to a developer's machine.
 
 ## Purpose
 
-DeployGuard is an internal developer platform that allows teams to spin up an ephemeral, complete Kubernetes environment locally using `k3d`. It uses a declarative YAML approach (`deployguard.yaml`) and strict GitOps methodologies via ArgoCD. The purpose is to allow developers to focus on writing application code, while DeployGuard handles the scaffolding, dependency resolution, mocking, and E2E testing seamlessly.
+DeployGuard is a standalone local development tool for building and running microservices, dependencies, mocks, seeds, and integration tests. A declarative `deployguard.yaml` describes the environment. DeployGuard combines k3d, Skaffold, Helm, and ArgoCD without depending on any company's repositories or platform.
 
 ## Features
 
-DeployGuard's main features are:
-
-- **Declarative Topology (`deployguard.yaml`)**: Define your entire ecosystem—services, databases, brokers, and mocks—in a single, easy-to-read configuration file.
-- **Strict GitOps via ArgoCD**: All deployments are managed by ArgoCD reading from a dynamically generated, ephemeral local Helm repository, ensuring 100% parity with modern deployment practices.
-- **Dependency Graph & Focus Mode**: Intelligent dependency resolution (`depends_on`). Use `--focus <service>` to deploy only what you need, saving local CPU and RAM.
-- **Built-in Mocks & Seeds**: Native support for WireMock HTTP stubs and database initialization scripts, ensuring strict Separation of Concerns between infrastructure state and application data.
-- **Integrated Test Runner**: Spawn ephemeral Kubernetes Jobs to execute E2E and Integration test suites natively inside the cluster's network.
+- **Declarative Topology:** Validate entity names, build paths, secret references, and the complete dependency graph before deployment.
+- **Skaffold Builds:** Build selected local Docker contexts, reuse its build cache, and deploy the resulting image references through k3d.
+- **GitOps via ArgoCD:** Generate a separate local Git repository and serve immutable snapshots through Nginx. ArgoCD owns workload deployment and dependency ordering.
+- **Dependency Graph & Focus Mode:** Use `--focus <entity>` to select its prerequisites. Existing unselected applications remain until you explicitly request `--prune`.
+- **Mocks, Seeds & Secrets:** Use WireMock, explicit initialization Jobs, Kubernetes Secret references, and optional Vault bindings through External Secrets Operator.
+- **Integrated Test Runner:** Register suspended test Jobs and execute them explicitly, with live logs and authoritative Kubernetes Job results.
 
 ## Usage
 
-In order to try out the project yourself, follow the detailed setup instructions in our getting started guide:
-
 👉 **[Read the Full Get Started Guide](docs/get-started.md)**
 
-A high-level overview of the workflow:
-1. Define your `deployguard.yaml`.
-2. Run `./scripts/setup.sh` to initialize K3d.
-3. Run `./scripts/sync-env.sh` to automatically build, scaffold, and deploy everything via ArgoCD.
-4. Verify rollout using `./scripts/verify.sh`.
+From the repository root, prepare the local tooling:
+
+```bash
+./scripts/deployguard install
+```
+
+Set your credentials in `.env`, define your topology, and run:
+
+1. Define and validate your topology with `./scripts/deployguard validate`.
+2. Run `./scripts/deployguard setup` to create the local k3d cluster.
+3. Run `./scripts/deployguard bootstrap` to install ArgoCD and any required secret operator.
+4. Run `./scripts/deployguard sync` to build, deploy, and verify the selected environment.
+5. Run `./scripts/deployguard test <test-name>` to execute an integration suite.
 
 ## Demo / Test Scenario
 
-DeployGuard comes with a fully-featured, built-in Enterprise Event-Driven test scenario.
+DeployGuard includes a local demo with a gateway, backend, workers, databases, messaging, mocks, and integration tests.
 
-👉 **[Explore the Test Scenario](docs/test-scenario.md)** 
+👉 **[Explore the Test Scenario](docs/test-scenario.md)**
 
-*(You can easily remove this demo using `./scripts/clear-test-scenario.sh` to start building your own apps!)*
+The demo is an example topology. It does not define which technologies your own services must use. To start your own topology, `./scripts/deployguard clear-scenario` moves known demo assets into a recoverable backup; replace `deployguard.yaml` before syncing again.
 
 ## Documentation (Entities)
 
-DeployGuard treats different architectural components as primary platform entities. Read the specific guides below to understand how each is configured and deployed:
+- 📦 **[Services & Workers](docs/services.md)**: Application eligibility, custom paths, environment variables, and secret bindings.
+- 🐘 **[Dependencies](docs/dependencies.md)**: Remote Helm charts, local charts, and observability tools.
+- 🤡 **[Mock Services](docs/mocks.md)**: WireMock mappings and dependency declarations.
+- 🌱 **[Seeds](docs/seeds.md)**: Platform initialization and service migrations.
+- 🧪 **[Tests](docs/tests.md)**: Verification, explicit test execution, and CI coverage.
 
-- 📦 **[Services & Workers](docs/services.md)**: Standard HTTP apps and background consumers.
-- 🐘 **[Dependencies](docs/dependencies.md)**: External tools (Postgres, Kafka, RabbitMQ) and Platform Observability UI tools.
-- 🤡 **[Mock Services](docs/mocks.md)**: Ephemeral WireMock instances.
-- 🌱 **[Seeds](docs/seeds.md)**: How data initialization works.
-- 🧪 **[Tests](docs/tests.md)**: How the E2E Test runner operates.
+CI checks the documented behavior, the full demo, focused deployment, and a separate generic fixture. A passing run establishes that those checks passed on the tested toolchain; it cannot guarantee every possible application or host configuration.
 
 ## License
 

@@ -1,0 +1,4 @@
+{
+  "request": {"method": "GET", "url": "/fixture"},
+  "response": {"status": 200, "headers": {"Content-Type": "application/json"}, "jsonBody": {"mocked": true}}
+}

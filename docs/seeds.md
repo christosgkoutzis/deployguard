@@ -1,37 +1,42 @@
 # Initialization & Data Seeding
 
-DeployGuard strictly separates Infrastructure State from Application Data. It provides two distinct seeding mechanisms to ensure a clean Separation of Concerns across your local environment.
+DeployGuard supports explicit platform seeds and service initialization hooks. Both run inside Kubernetes and participate in ArgoCD dependency ordering.
 
 ## 1. Platform Seeds (Infrastructure State)
 
-Use platform seeds for initializing cluster-level dependencies. Examples include seeding HashiCorp Vault secrets, creating complex Kafka topics, or configuring RabbitMQ vhosts.
+Use `seeds` for initializing shared dependencies, such as populating Vault, creating Kafka topics, or configuring RabbitMQ vhosts. Each seed declares its prerequisites, runtime, files, and credentials.
 
-*   **Location:** Place your scripts in the root `seeds/` directory (e.g., `seeds/seed_vault.py`).
-*   **How it works:** The orchestrator dynamically packages the contents of this directory into a global Kubernetes `ConfigMap` during the deployment phase.
-*   **Execution:** These files are automatically mounted as read-only inside your service's initialization container at the `/seeds/` path.
+```yaml
+seeds:
+  - name: prepare-data
+    image: python:3.11-slim
+    files: seeds/prepare-data
+    command: [python, /seeds/prepare.py]
+    depends_on: [postgres]
+    env_from: [database-credentials]
+```
 
-## 2. Service Seeds (Application Data)
+Declare the referenced dependency and Secret in the same topology. The files directory resolves relative to the topology. Group each seed under `seeds/<name>/` and set `files` explicitly; omitting it uses `seeds`. Use a flat directory of text files, packaged into a ConfigMap mounted at `/seeds`. Keep its size within Kubernetes ConfigMap limits and keep credentials out of file content.
 
-Use service seeds for inserting dummy data, creating default users, or running database schema migrations specific to a single microservice.
+Supply either `image` or `build_path`, with a Dockerfile at a custom build path. Install libraries in the runtime image instead of downloading them when the Job starts. The demo's `vault-seeder` keeps its Dockerfile, Python dependencies, and seed script together in `seeds/vault-seeder/`.
 
-*   **Location:** Place your scripts directly inside your microservice's directory, e.g., `services/<service-name>/` (e.g., `services/python-backend/seed_db.py`).
-*   **How it works:** These files are naturally built into your service's Docker image during the build phase.
-*   **Execution:** They are executed directly from your application's working directory.
+Job names include a hash of generated configuration, files, the image reference, and declared bootstrap credentials. Unchanged inputs retain the completed Job; changed inputs create a new Job whose successful completion gates dependents. Current credential hashing includes all declared bootstrap Secrets. Make seed scripts idempotent because changed credentials, rebuilt runtimes, or recreating the cluster can trigger initialization again.
 
-## How to Trigger Them (The Chain)
+## 2. Service Initialization (Application Data)
 
-Developers can trigger both Platform and Service seeds sequentially by defining an `INIT_COMMAND` environment variable inside the `deployguard.yaml`. 
+Keep migrations and application seed scripts in the service build context so they are included in its image. Declare an `init_command` or `INIT_COMMAND` env entry:
 
-When this command is present, DeployGuard automatically wraps it in an ephemeral Kubernetes `Job` using Helm hooks (`pre-install`, `pre-upgrade`). This ensures that the initialization script completely finishes before the main application pods are allowed to start.
-
-**Example `deployguard.yaml` configuration:**
 ```yaml
 services:
   - name: python-backend
-    depends_on:
-      - postgres
-      - vault
-    env:
-      # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
-      - INIT_COMMAND="python /seeds/seed_vault.py && python migrate.py && python seed_db.py"
+    depends_on: [postgres, vault-backend]
+    init_command: python migrate.py && python seed_db.py
 ```
+
+Initialization uses an ArgoCD `Sync` hook in wave 1, after any ExternalSecret in wave 0 and before the Deployment in wave 2. It uses the service image, environment, Secret references, and resources. Commands run through `/bin/sh -c` in the image's working directory.
+
+Hooks run on each deployment sync for the selected service. Successful hooks are removed; failed hooks fail the sync and remain available for diagnostics. Images using initialization commands need a shell. Commands must be safe to repeat; applications should coordinate concurrent migrations when needed.
+
+## Execution and Failures
+
+Jobs use `backoffLimit: 0` and an active deadline. An entity's `timeout` overrides its Job deadline; `TIMEOUT_SECONDS` controls default command waits. Failed seeds and initialization hooks prevent successful deployment. Tests execute separately through the [test command](tests.md).

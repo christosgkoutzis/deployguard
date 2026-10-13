@@ -1,0 +1,19 @@
+externalSecret:
+  enabled: false
+  vaultPath: ""
+  secretStore: ""
+  secretStoreKind: SecretStore
+image:
+  ref: ""
+  repository: ""
+  tag: ""
+resources: {}
+env: {}
+secretEnv: {}
+envFrom: []
+initCommand: ""
+timeout: 600
+command: []
+args: []
+suspended: true
+runId: registered

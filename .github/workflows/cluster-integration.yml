@@ -1,70 +1,148 @@
-name: End-to-End Cluster Validation
+name: DeployGuard Tests
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PIP_CACHE_DIR: ${{ github.workspace }}/.local/cache/pip
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployguard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-verify:
-    runs-on: ubuntu-latest
+  static-and-unit-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - name: Checkout Repository
+      - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Setup Tools and Local Cluster
-        run: ./scripts/setup.sh
-      
-      - name: Inject CI Secrets
-        run: cp .env.example .env
-
-      - name: Bootstrap Platform
-        run: ./scripts/bootstrap-platform.sh
-
-      - name: Sync Focused Environment
+      - name: Prepare Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install isolated Python dependencies and pinned tools
+        run: ./scripts/deployguard install --assessment
+      - name: Validate syntax and schemas, run unit tests and render Helm charts
+        env:
+          TMPDIR: ${{ github.workspace }}/.local/tmp
         run: |
-          FOCUS_SVC=$(yq '.services[0].name' deployguard.yaml)
-          echo "INFO: Focusing on $FOCUS_SVC"
-          ./scripts/sync-env.sh --focus "$FOCUS_SVC"
+          ./scripts/deployguard check
+          .local/venv/bin/python -m pytest tests/unit -q
+          ./scripts/deployguard validate
+          FIXTURE_PASSWORD=ci-fixture-credential ./scripts/deployguard validate --topology tests/platform-fixture/topology.yaml
 
-      - name: Verify Focused Environment
+  end-to-end-tests:
+    needs: static-and-unit-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CLUSTER_NAME: deployguard-ci
+      TIMEOUT_SECONDS: '600'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Prepare Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tooling
+        run: ./scripts/deployguard install
+      - name: Fresh bootstrap
         run: |
-          source .sync-env.env
-          MOCK_APP_NAMES="${MOCKS}" \
-          ./scripts/verify.sh
-
-      - name: Sync Full Environment (Deploy all services)
-        run: ./scripts/sync-env.sh
-      
-      - name: Verify Full Environment
+          ./scripts/deployguard setup
+          ./scripts/deployguard bootstrap
+      - name: Deploy and verify focused environment
         run: |
-          source .sync-env.env
-          MOCK_APP_NAMES="${MOCKS}" \
-          ./scripts/verify.sh
-
-      - name: E2E Functional Validation (via Test Runner)
+          ./scripts/deployguard sync --focus e2e-tests
+          ./scripts/deployguard verify
+          ./scripts/deployguard assess scenario --mode focused
+      - name: Test focused environment and repeated sync
         run: |
-          TEST_SVC=$(yq '.services[] | select(.type == "test") | .name' deployguard.yaml | head -n 1)
-          if [[ -n "$TEST_SVC" ]]; then
-            echo "INFO: Running integrated E2E test suite for $TEST_SVC..."
-            ./scripts/run-tests.sh "$TEST_SVC"
-          else
-            echo "INFO: No test workload defined in deployguard.yaml. Skipping."
-          fi
-          
-      - name: Debug Cluster State On Failure
-        if: ${{ failure() }}
+          ./scripts/deployguard list-tests > .local/state/test-names.txt
+          test -s .local/state/test-names.txt
+          while IFS= read -r suite; do ./scripts/deployguard test "$suite"; done < .local/state/test-names.txt
+          ./scripts/deployguard sync --focus e2e-tests
+          while IFS= read -r suite; do ./scripts/deployguard test "$suite"; done < .local/state/test-names.txt
+      - name: Expand and verify full environment
         run: |
-          echo "INFO: ArgoCD Applications Status..."
-          kubectl -n argocd get applications || true
+          ./scripts/deployguard sync
+          ./scripts/deployguard verify
+          ./scripts/deployguard assess scenario --mode full
+      - name: Test full environment and repeated sync
+        run: |
+          ./scripts/deployguard list-tests > .local/state/test-names.txt
+          test -s .local/state/test-names.txt
+          while IFS= read -r suite; do ./scripts/deployguard test "$suite"; done < .local/state/test-names.txt
+          ./scripts/deployguard sync
+          while IFS= read -r suite; do ./scripts/deployguard test "$suite"; done < .local/state/test-names.txt
+      - name: Collect focused diagnostics
+        if: failure()
+        run: ./scripts/deployguard assess diagnostics
+      - name: Remove runner resources
+        if: always()
+        run: |
+          docker stop "deployguard-source-${CLUSTER_NAME}" || true
+          docker container rm "deployguard-source-${CLUSTER_NAME}" || true
+          .local/bin/k3d cluster delete "$CLUSTER_NAME" || true
 
-          echo "INFO: Deployguard Workloads Status..."
-          kubectl -n deployguard get pods,svc,ingress,pvc || true
+  deployment-lifecycle-tests:
+    needs: static-and-unit-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CLUSTER_NAME: deployguard-ci
+      FIXTURE_PASSWORD: ci-fixture-credential
+      TIMEOUT_SECONDS: '300'
+      TOPOLOGY_FILE: tests/platform-fixture/topology.yaml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Prepare Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tooling
+        run: ./scripts/deployguard install
+      - name: Test deployment updates, configuration and failure recovery
+        run: |
+          ./scripts/deployguard setup
+          ./scripts/deployguard bootstrap
+          ./scripts/deployguard sync
+          ./scripts/deployguard test fixture-tests
+          ./scripts/deployguard test fixture-tests
+          ./scripts/deployguard assess generic
+      - name: Collect focused diagnostics
+        if: failure()
+        run: ./scripts/deployguard assess diagnostics
+      - name: Remove runner resources
+        if: always()
+        run: |
+          docker stop "deployguard-source-${CLUSTER_NAME}" || true
+          docker container rm "deployguard-source-${CLUSTER_NAME}" || true
+          .local/bin/k3d cluster delete "$CLUSTER_NAME" || true
 
-          echo "INFO: Fetching details for FAILING or PENDING pods only..."
-          kubectl -n deployguard get pods --field-selector=status.phase!=Running,status.phase!=Succeeded -o name \
-            | xargs -r -I{} sh -c 'echo "--- Describing {} ---"; kubectl -n deployguard describe {}; echo "--- Logs for {} ---"; kubectl -n deployguard logs {} --all-containers=true --tail=100' || true
-
-          echo "INFO: Recent WARNING events..."
-          kubectl -n deployguard get events --field-selector type=Warning --sort-by=.lastTimestamp | tail -n 50 || true
+  all-tests-passed:
+    if: always()
+    needs: [static-and-unit-tests, end-to-end-tests, deployment-lifecycle-tests]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every test job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          assert all(job['result'] == 'success' for job in results.values()), results
+          PY

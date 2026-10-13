@@ -1,49 +1,107 @@
-# Services & Workers Eligibility Contract
+# Services & Workers
 
-This document defines exactly when the internal scaffolding (`scripts/add-service.sh`) is expected to generate a working Helm chart and ArgoCD Application. If a service meets all requirements below and still fails in local cluster deployment, it is considered a repository bug.
+Declare application services and background workers under `services` in your topology. DeployGuard builds their Docker contexts and deploys them with the appropriate chart.
 
 ## Required Service Location & Files
 
-1. By default, service code and its `Dockerfile` are expected in `services/<service-name>/`. You can place your code anywhere by defining a custom `build_path` in your topology YAML.
-2. `<service-name>` must consist of lowercase letters, numbers, and hyphens only.
+1. Application services default to `services/<name>/`; test services default to `tests/<name>/`.
+2. Custom build_path values point to local Docker contexts relative to the topology.
+3. Every context must contain a Dockerfile.
+4. Names must be unique lowercase DNS labels of at most 40 characters.
 
 ## Workload Archetypes
 
-DeployGuard natively supports different architectural patterns via the `type` field in your `deployguard.yaml`:
-
-* `webservice` (Default): Creates a Kubernetes Deployment, an internal K8s Service, an Ingress route, and enforces HTTP readiness probes.
-* `worker`: Creates only a Kubernetes Deployment. Ideal for background processors, queue consumers, or async tasks that do not expose web ports.
+- webservice (default): Deployment, internal Service, Ingress, and HTTP readiness probe.
+- worker: Deployment without an HTTP probe, Service, or Ingress.
+- test: Suspended Job executed through the [test runner](tests.md).
 
 ## Required Runtime Shape
 
-1. Single container HTTP service (or background worker).
-2. Web services must expose a health endpoint path defined in the topology (or default `/health`).
-3. The service may optionally be stateful (creates a `StatefulSet`) if it requires a PVC mount, but it must still expose an HTTP health endpoint.
-4. The service must listen on a single main HTTP port and be reachable through K8s Service mapping.
-
-## Customizing Environment Variables
-
-DeployGuard supports a flexible, hybrid approach for injecting configuration into your services:
-
-1. **Inline Overrides (`env`):** Best for platform-specific commands or simple variables.
-2. **External Files (`env_file`):** Best for standard application environment variables. You can point this to `.env.development`, `.env.local`, or any custom env file residing inside the service directory (e.g., `env_file: .env.local`).
-
-## Dynamic Service Configuration
-
-You do not have to conform to the default `services/` folder, port `8000`, or `/health`. You can define them explicitly per service in your YAML:
+Applications use a single-container stateless Deployment, or a single-container test Job. Web applications must listen on all interfaces and expose a successful HTTP health endpoint. Workers must remain running without needing an HTTP port.
 
 ```yaml
 services:
-  - name: legacy-api
-    build_path: "./backend/legacy-api"
+  - name: sample-api
+    build_path: ./backend/sample-api
     port: 3000
-    health_endpoint: "/api/status"
+    health_endpoint: /api/status
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {memory: 256Mi}
+  - name: queue-consumer
+    type: worker
+    build_path: ./background/consumer
+    depends_on: [sample-api]
 ```
 
-## Explicitly Unsupported Cases 
+Defaults are port 8000, health path /health, and one replica. The internal Service is `<name>-service` on port 80; other pods use `http://<name>-service:80`. Deployment names are `<name>-workload`.
 
-1. Multi-container pods or sidecar-dependent workloads.
-2. Stateful services that require complex clustering (e.g., multi-node databases). Single-node HTTP-wrapped stateful services are supported.
+## Customizing Environment Variables
+
+An env_file is parsed as dotenv data, not sourced as shell code. It resolves inside the build context. Inline env entries override the file; surrounding quotes are accepted. Placeholders resolve from the repository .env and process environment, with process variables taking precedence. Missing variables and duplicate inline keys are errors.
+
+```yaml
+services:
+  - name: sample-api
+    build_path: ./backend/sample-api
+    env_file: .env.development
+    env:
+      - APP_MODE=local
+      - PUBLIC_URL=http://sample-api.${CLUSTER_DOMAIN}:${INGRESS_PORT}
+    command: [python, server.py]
+    args: [--verbose]
+```
+
+Command and args are container argument arrays. An init_command or INIT_COMMAND env entry defines an initialization hook; see [Seeds](seeds.md).
+
+## Secrets Management
+
+Services that do not need secrets require no Vault or ESO configuration. For local credentials, declare a Kubernetes Secret and refer to its keys:
+
+```yaml
+secrets:
+  - name: database-credentials
+    values:
+      password: DATABASE_PASSWORD
+services:
+  - name: sample-api
+    secret_env:
+      DB_PASSWORD: {name: database-credentials, key: password}
+```
+
+Set DATABASE_PASSWORD in your .env or terminal environment. DeployGuard writes its value directly to the Kubernetes Secret; generated deployment configuration contains only the Secret name and key. `env_from: [database-credentials]` imports every key. Do not duplicate a variable in env and secret_env.
+
+External Secrets Operator (ESO) reads credentials from Vault into Kubernetes Secrets for your services. To use Vault KV v2, declare a secret store and service binding:
+
+```yaml
+secrets:
+  - name: vault-token
+    values: {token: VAULT_ROOT_TOKEN}
+secret_stores:
+  - name: vault-store
+    server: http://vault:8200
+    path: secret
+    token_secret: {name: vault-token, key: token}
+    depends_on: [vault-seeder]
+services:
+  - name: sample-api
+    external_secret:
+      store: vault-store
+      path: applications/sample-api
+```
+
+Declare vault-seeder and its Vault prerequisite in the same topology. The store dependency is added automatically to the service graph. ESO extracts the path into `<name>-secret`; startup waits for successful synchronization. Rerun bootstrap when adding stores to an operator-free cluster.
+
+On sync, DeployGuard refreshes managed ExternalSecrets and rolls selected Deployments and StatefulSets when their referenced Secret versions change. Vault changes require another sync to reach running containers; DeployGuard does not add a background restart controller.
+
+Kubernetes Secrets and Vault dev mode serve the disposable local environment. Secret references do not encrypt local files or turn this into a production secrets platform.
+
+## Explicitly Unsupported Cases
+
+1. Multi-container pods or workloads requiring sidecars.
+2. Stateful application clustering through service fields; use a dependency chart.
 3. Web services without an HTTP health endpoint.
-4. Complex ingress, mTLS, or custom network policy requirements.
-5. Direct remote Git repository onboarding (input must be a local folder).
+4. Advanced ingress, mTLS, or network policy configuration through service fields.
+5. Direct remote Git onboarding; build input must be a local folder.
+
+Use a custom dependency chart for Kubernetes shapes outside these archetypes.

@@ -78,7 +78,7 @@ def scenario(mode):
     assert {a['metadata']['name'] for a in apps}==set(selected)|{topology.name+'-environment'}
     if mode=='focused':
         assert 'dozzle' not in selected and 'kafbat-ui' not in selected
-    for key in ['VAULT_ROOT_TOKEN','POSTGRES_PASSWORD','MINIO_ROOT_PASSWORD','RABBITMQ_PASSWORD',
+    for key in ['VAULT_ROOT_TOKEN','POSTGRES_PASSWORD','S3_SECRET_ACCESS_KEY','RABBITMQ_PASSWORD',
                 'REDIS_PASSWORD','ELASTIC_PASSWORD']:
         value=settings.environment[key]
         # Scan every committed generated revision, not just the latest tree.
@@ -245,6 +245,18 @@ def _generic(base):
 def diagnostics():
     settings=Settings.load()
     kube=Kubernetes(settings)
+    topology=None
+    credentials=[]
+    try:
+        topology=Topology(settings)
+        credentials=[settings.environment[variable] for secret in topology.data.get('secrets', [])
+                     for variable in secret['values'].values()]
+    except ConfigError:
+        print('WARNING: Topology is invalid; Application messages will be omitted')
+    try:
+        kube.command('get','nodes','-o','wide')
+    except ConfigError:
+        pass
     for namespace in [settings.namespace,settings.argo_namespace,'external-secrets']:
         try:
             kube.command('-n',namespace,'get','pods')
@@ -267,6 +279,12 @@ def diagnostics():
         except Exception:
             pass
     kube.command('-n',settings.argo_namespace,'get','applications')
+    if topology is not None:
+        apps=json.loads(kube.command('-n',settings.argo_namespace,'get','applications','-o','json',capture=True))['items']
+        for app in apps:
+            status=app.get('status', {})
+            if status.get('sync', {}).get('status') != 'Synced' or status.get('health', {}).get('status') != 'Healthy':
+                kube.application_diagnostics(app['metadata']['name'], credentials=credentials)
 
 
 def assess(target, mode='full'):

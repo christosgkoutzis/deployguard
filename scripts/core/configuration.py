@@ -35,7 +35,7 @@ class Settings:
     def load(cls, topology=None):
         env = {**dotenv_values(ROOT / '.env', interpolate=False), **os.environ}
         defaults = {
-            'MINIO_ROOT_USER': 'admin', 'CLUSTER_NAME': 'control-plane-cluster', 'NAMESPACE': 'deployguard',
+            'S3_ACCESS_KEY_ID': 'admin', 'CLUSTER_NAME': 'control-plane-cluster', 'NAMESPACE': 'deployguard',
             'ARGO_APP_NAMESPACE': 'argocd', 'CLUSTER_DOMAIN': '127.0.0.1.nip.io',
             'API_PORT': '6443', 'INGRESS_PORT': '8080', 'SOURCE_PORT': '8081', 'TIMEOUT_SECONDS': '600',
         }

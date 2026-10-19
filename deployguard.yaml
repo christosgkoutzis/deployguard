@@ -27,17 +27,38 @@ dependencies:
           - name: bootstrap
             mountPath: /vault/userconfig/bootstrap
             readOnly: true
- # 2. MINIO (Official Open-Source S3)
-  - name: minio
-    repo: https://charts.min.io/
-    chart: minio
-    version: "5.3.0"
-    set:
-      - "mode=standalone"
-      - "persistence.enabled=false"
-      - "existingSecret=minio-bootstrap"
-      - "resources.requests.memory=256Mi"
-      - "resources.requests.cpu=100m"
+  # 2. SEAWEEDFS (Local S3 Object Storage)
+  - name: seaweedfs
+    repo: https://seaweedfs.github.io/seaweedfs/helm
+    chart: seaweedfs
+    version: "4.48.0"
+    values:
+      image:
+        tag: "4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d"
+      global:
+        seaweedfs:
+          createClusterRole: false
+          automountServiceAccountToken: false
+      master:
+        enabled: false
+      volume:
+        enabled: false
+      filer:
+        enabled: false
+      allInOne:
+        enabled: true
+        s3:
+          enabled: true
+        data:
+          type: emptyDir
+        secretExtraEnvironmentVars:
+          AWS_ACCESS_KEY_ID:
+            secretKeyRef: {name: platform-bootstrap-secrets, key: S3_ACCESS_KEY_ID}
+          AWS_SECRET_ACCESS_KEY:
+            secretKeyRef: {name: platform-bootstrap-secrets, key: S3_SECRET_ACCESS_KEY}
+        resources:
+          requests: {memory: 256Mi, cpu: 100m}
+          limits: {memory: 1Gi, cpu: "1"}
   # 3. RABBITMQ (Native Local Chart)
   - name: rabbitmq
     path: platform/dependencies/rabbitmq-instance-chart
@@ -143,7 +164,7 @@ services:
       - kafka
       - redis
       - elasticsearch
-      - minio
+      - seaweedfs
       - rabbitmq
       - vault-backend
     external_secret:
@@ -154,7 +175,7 @@ services:
       - INIT_COMMAND=python migrate.py && python seed_db.py
       - ES_HOST=http://elasticsearch-service:9200
       - VAULT_URL=http://vault:8200
-      - S3_ENDPOINT=http://minio:9000
+      - S3_ENDPOINT=http://seaweedfs-all-in-one:8333
       - AWS_DEFAULT_REGION=us-east-1
       - RABBITMQ_HOST=rabbitmq
     resources:
@@ -162,8 +183,8 @@ services:
         memory: 256Mi
 
     secret_env:
-      AWS_ACCESS_KEY_ID: {name: platform-bootstrap-secrets, key: MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: {name: platform-bootstrap-secrets, key: MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: {name: platform-bootstrap-secrets, key: S3_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: {name: platform-bootstrap-secrets, key: S3_SECRET_ACCESS_KEY}
       RABBITMQ_PASSWORD: {name: platform-bootstrap-secrets, key: RABBITMQ_PASSWORD}
       POSTGRES_PASSWORD: {name: platform-bootstrap-secrets, key: POSTGRES_PASSWORD}
       VAULT_ROOT_TOKEN: {name: platform-bootstrap-secrets, key: VAULT_ROOT_TOKEN}
@@ -199,7 +220,7 @@ services:
     depends_on:
       - python-backend
       - postgres
-      - minio
+      - seaweedfs
       - rabbitmq
       - vault-backend
     external_secret:
@@ -207,13 +228,13 @@ services:
       path: deployguard/report-worker
     env:
       - VAULT_URL=http://vault:8200
-      - S3_ENDPOINT=http://minio:9000
+      - S3_ENDPOINT=http://seaweedfs-all-in-one:8333
       - AWS_DEFAULT_REGION=us-east-1
       - RABBITMQ_HOST=rabbitmq
 
     secret_env:
-      AWS_ACCESS_KEY_ID: {name: platform-bootstrap-secrets, key: MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: {name: platform-bootstrap-secrets, key: MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: {name: platform-bootstrap-secrets, key: S3_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: {name: platform-bootstrap-secrets, key: S3_SECRET_ACCESS_KEY}
       RABBITMQ_PASSWORD: {name: platform-bootstrap-secrets, key: RABBITMQ_PASSWORD}
       VAULT_ROOT_TOKEN: {name: platform-bootstrap-secrets, key: VAULT_ROOT_TOKEN}
   - name: e2e-tests
@@ -226,6 +247,7 @@ services:
       - external-api-mock
     env:
       - TARGET_URL=http://ruby-gateway-service:80
+      - S3_ENDPOINT=http://seaweedfs-all-in-one:8333
 
 # Explicit local bootstrap Secrets. Values name environment variables, never credentials.
 secrets:
@@ -233,18 +255,14 @@ secrets:
     values:
       VAULT_ROOT_TOKEN: VAULT_ROOT_TOKEN
       POSTGRES_PASSWORD: POSTGRES_PASSWORD
-      MINIO_ROOT_PASSWORD: MINIO_ROOT_PASSWORD
-      MINIO_ROOT_USER: MINIO_ROOT_USER
+      S3_SECRET_ACCESS_KEY: S3_SECRET_ACCESS_KEY
+      S3_ACCESS_KEY_ID: S3_ACCESS_KEY_ID
       RABBITMQ_PASSWORD: RABBITMQ_PASSWORD
       REDIS_PASSWORD: REDIS_PASSWORD
       ELASTIC_PASSWORD: ELASTIC_PASSWORD
   - name: vault-bootstrap
     values:
       token: VAULT_ROOT_TOKEN
-  - name: minio-bootstrap
-    values:
-      rootUser: MINIO_ROOT_USER
-      rootPassword: MINIO_ROOT_PASSWORD
 
 seeds:
   - name: vault-seeder
@@ -256,7 +274,7 @@ seeds:
 
 secret_stores:
   - name: vault-backend
-    server: http://vault:8200
+    server: http://vault.${NAMESPACE}.svc.cluster.local:8200
     path: secret
     token_secret: {name: vault-bootstrap, key: token}
     depends_on: [vault-seeder]

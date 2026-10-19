@@ -79,7 +79,7 @@ secrets:
     values: {token: VAULT_ROOT_TOKEN}
 secret_stores:
   - name: vault-store
-    server: http://vault:8200
+    server: http://vault.${NAMESPACE}.svc.cluster.local:8200
     path: secret
     token_secret: {name: vault-token, key: token}
     depends_on: [vault-seeder]
@@ -89,6 +89,8 @@ services:
       store: vault-store
       path: applications/sample-api
 ```
+
+Use a namespace-qualified Vault address: ESO connects from the `external-secrets` namespace, so a short hostname such as `vault` does not resolve to the application namespace. `${NAMESPACE}` uses your configured application namespace.
 
 Declare vault-seeder and its Vault prerequisite in the same topology. The store dependency is added automatically to the service graph. ESO extracts the path into `<name>-secret`; startup waits for successful synchronization. Rerun bootstrap when adding stores to an operator-free cluster.
 

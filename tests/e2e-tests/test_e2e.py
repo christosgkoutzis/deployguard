@@ -11,6 +11,7 @@ import requests
 
 TARGET_URL = os.getenv('TARGET_URL','http://ruby-gateway-service:80')
 BACKEND_URL = os.getenv('BACKEND_URL','http://python-backend-service:80')
+S3_ENDPOINT = os.getenv('S3_ENDPOINT','http://seaweedfs-all-in-one:8333')
 GREETING = 'Integration Test Greeting '+uuid.uuid4().hex
 
 
@@ -73,12 +74,15 @@ def test_async_export():
         if result.status_code not in [301,302,303]:
             return False
         url=result.headers.get('Location','')
-        if urlparse(url).hostname!='minio':
-            return False
+        parsed = urlparse(url)
+        assert parsed.scheme == urlparse(S3_ENDPOINT).scheme
+        assert parsed.netloc == urlparse(S3_ENDPOINT).netloc
+        assert parse_qs(parsed.query).get('X-Amz-Signature')
+        assert requests.get(parsed._replace(query='').geturl(), timeout=10).status_code in [401,403]
         report=requests.get(url,timeout=10)
         if report.status_code==404:
             return False
         report.raise_for_status()
         return any(row.get('Greeting')==GREETING and row.get('Status')=='Approved'
                    for row in csv.DictReader(io.StringIO(report.text)))
-    eventually(exported,'RabbitMQ/MinIO did not produce a downloadable CSV containing the new event')
+    eventually(exported,'RabbitMQ/S3 did not produce a downloadable CSV containing the new event')

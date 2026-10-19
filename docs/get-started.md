@@ -81,7 +81,7 @@ DeployGuard rejects conflicting Applications or bootstrap Secrets that it does n
 ./scripts/deployguard bootstrap
 ```
 
-Bootstrap creates namespaces, installs the pinned ArgoCD chart, and creates the topology's AppProject. External Secrets Operator is installed only when the topology declares secret_stores. Bootstrap uses Helm; application workloads are subsequently reconciled by ArgoCD.
+Bootstrap creates namespaces, installs the pinned ArgoCD chart, and creates the topology's AppProject. External Secrets Operator is installed only when the topology declares secret_stores. Bootstrap uses Helm; application workloads are subsequently reconciled by ArgoCD. ArgoCD’s internal Redis uses the official Docker Hub image, pinned by digest in `platform/config/argocd-values.yaml`.
 
 ## 5. Sync Environment
 

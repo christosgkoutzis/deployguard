@@ -50,7 +50,7 @@ Each test job uses a separate runner. The "Check out repository" step fetches th
 | Job | Coverage |
 | --- | --- |
 | `static-and-unit-tests` | Python/shell/JSON/YAML syntax, schema validity, unit tests, offline Helm rendering, demo and fixture topology validation; runs once |
-| `end-to-end-tests` | The included services' HTTP, database, messaging, cache, search and CSV export flows; one bootstrap, focused deployment followed by full expansion on the same cluster, deployment health, build and Application inventory, generated Git credential scan, repeated sync and tests |
+| `end-to-end-tests` | The included services' HTTP, database, messaging, cache, search and CSV export flows, including signed downloads and rejection of unsigned downloads; one bootstrap, focused deployment followed by full expansion on the same cluster, deployment health, build and Application inventory, generated Git credential scan, repeated sync and tests |
 | `deployment-lifecycle-tests` | Custom paths/ports/health/env files, optional Vault, Secret references, workers without HTTP, seeds, mocks, repeated Jobs, changed source updating images, focus retention/pruning, failing initialization, missing charts, failed-test retries, unhealthy retained apps, Secret updates, mapping updates, isolated test execution |
 | `all-tests-passed` | Collects the other jobs' results and fails if any failed, was cancelled or was skipped; runs no tests itself |
 
@@ -61,6 +61,8 @@ The generic fixture tests custom application layouts alongside the demo. Its sou
 Sync reports snapshot generation, each selected entity, Git recording, source startup and Application submission. Unexpected file or data errors report their exception type and DeployGuard source location; filesystem errors include an error number and invalid JSON includes its line and column. Raw exception messages, file contents and configuration values are omitted.
 
 The local Git source has a 30-second HTTP readiness deadline. Connection resets or disconnects during startup are retried; sync fails if the source remains unavailable when the deadline expires.
+
+A failed child-Application wait reports the requested, desired and observed revisions, sync and health status, condition messages, operation phase and resource results. Messages redact declared credential values; manifests and Secret contents are omitted. CI diagnostics also report node readiness and reconciliation details for Applications that are unhealthy or out of sync.
 
 Configure branch protection to require `all-tests-passed` if you want merges gated on the complete test workflow. A green run demonstrates this coverage on the tested toolchain and runner; it cannot prove every third-party chart, application, architecture, or host configuration works.
 

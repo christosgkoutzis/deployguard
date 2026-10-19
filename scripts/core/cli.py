@@ -120,7 +120,17 @@ def wait_environment(kube, topology, inventory, selected=None, *, refresh=False)
             if refresh and e['kind'] != 'test' and not kube.refresh_secret_consumers(n,refreshed=refreshed):
                 return False
             return kube.application_ready(n,e['source']['targetRevision'],health=e['kind']!='test')
-        kube.wait(name,ready)
+        try:
+            kube.wait(name,ready)
+        except ConfigError:
+            credentials = [topology.settings.environment[variable]
+                           for secret in topology.data.get('secrets', [])
+                           for variable in secret['values'].values()]
+            try:
+                kube.application_diagnostics(name, entry['source']['targetRevision'], credentials=credentials)
+            except (ConfigError, OSError, ValueError):
+                print(f'WARNING: Could not collect reconciliation details for {name}', file=sys.stderr)
+            raise
     # The parent must apply this revision; unrelated child health cannot gate focus or retries.
     kube.wait('parent configuration',lambda:kube.application_ready(
         f'{topology.name}-environment',inventory['revision'],health=False))

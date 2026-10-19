@@ -114,13 +114,13 @@ def read_db():
     except Exception as e:
         return {"error": str(e)}
 
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
-# Strict config to prevent virtual-hosted K8s DNS failures with MinIO
-s3_config = Config(s3={'addressing_style': 'path'})
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://seaweedfs-all-in-one:8333")
+# Path-style S3 requests use the cluster Service hostname for every bucket.
+s3_config = Config(signature_version='s3v4', s3={'addressing_style': 'path'})
 s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, region_name=os.getenv('AWS_DEFAULT_REGION', 'us-east-1'), config=s3_config)
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
-RABBITMQ_USER = os.getenv("AWS_ACCESS_KEY_ID", "admin")
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "admin")
 RABBITMQ_PASS = os.environ["RABBITMQ_PASSWORD"]
 
 @app.post("/db/write")

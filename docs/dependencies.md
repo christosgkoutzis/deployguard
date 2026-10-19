@@ -45,6 +45,12 @@ The committed `platform/dependencies/confluent-kafka-chart` runs the demo's sing
 
 The committed `platform/dependencies/rabbitmq-instance-chart` runs the demo's single-node `rabbitmq:3-management` instance with ephemeral storage. It reads its password from a Kubernetes Secret and uses native RabbitMQ readiness diagnostics. The Service is `rabbitmq`, exposing AMQP on port 5672 and management on port 15672.
 
+## Demo Object Storage
+
+The demo uses [SeaweedFS Community Edition](https://github.com/seaweedfs/seaweedfs) (Apache 2.0) through its upstream Helm chart. Its all-in-one mode runs storage and the S3 gateway in one pod. The chart version and multi-architecture project image digest are pinned in `deployguard.yaml`.
+
+The S3 endpoint is `http://seaweedfs-all-in-one:8333`. SeaweedFS reads `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from `platform-bootstrap-secrets` as AWS credential environment variables, which enable authenticated S3 access. Set these values in `.env`; the applications and Vault seed use the same credentials. Data uses `emptyDir` storage and is lost when the pod is replaced. Reports use path-style requests and Signature Version 4 presigned URLs.
+
 These are optional local dependencies. Other topologies can choose different native charts or tools.
 
 ## Platform Ecosystem & Observability

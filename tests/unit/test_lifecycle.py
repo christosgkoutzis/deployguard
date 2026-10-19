@@ -73,6 +73,64 @@ def test_git_source_readiness_retries_connection_failures_until_deadline(
     assert [args[:2] for args in commands] == [['docker','container'], ['docker','run']]
 
 
+@pytest.mark.parametrize('credential', ['synthetic-secret-value', 'quote"slash\\line\n'])
+def test_application_diagnostics_include_reconciliation_state_and_redact_credentials(monkeypatch, capsys, credential):
+    kube = Kubernetes(SimpleNamespace(argo_namespace='argocd'))
+    app = {'spec':{'source':{'targetRevision':'desired', 'helm':{'valuesObject':{'private':'not-for-logs'}}}},
+           'operation':{'sync':{}},
+           'status':{'sync':{'status':'OutOfSync','revision':'observed'},
+                     'health':{'status':'Healthy'},
+                     'conditions':[{'type':'SyncError','message':'Rejected '+credential}],
+                     'operationState':{'phase':'Running','message':'Waiting '+credential,
+                                       'syncResult':{'revision':'operation-revision','resources':[
+                                           {'kind':'Deployment','name':'api','status':'SyncFailed',
+                                            'message':'Invalid '+json.dumps(credential),'liveState':'not-for-logs'}]}},
+                     'resources':[{'kind':'Deployment','name':'api','status':'OutOfSync',
+                                   'health':{'status':'Healthy'}}]}}
+    monkeypatch.setattr(kube, 'get', lambda *args, **kwargs: app)
+    kube.application_diagnostics('api', 'requested', credentials=[credential])
+    output = capsys.readouterr().out
+    summary = json.loads(output.removeprefix('INFO: Application diagnostics: '))
+    assert summary['requestedRevision'] == 'requested'
+    assert summary['desiredRevision'] == 'desired' and summary['observedRevision'] == 'observed'
+    assert summary['syncStatus'] == 'OutOfSync' and summary['health'] == 'Healthy'
+    assert summary['pendingOperation'] is True
+    assert summary['operation']['phase'] == 'Running'
+    assert summary['operation']['revision'] == 'operation-revision'
+    assert summary['resources'][0]['status'] == 'OutOfSync'
+    assert summary['operation']['resources'][0]['status'] == 'SyncFailed'
+    assert credential not in output and json.dumps(credential)[1:-1] not in output
+    assert 'not-for-logs' not in output
+    assert '[REDACTED]' in summary['conditions'][0]['message']
+    assert '[REDACTED]' in summary['operation']['message']
+    assert '[REDACTED]' in summary['operation']['resources'][0]['message']
+
+
+@pytest.mark.parametrize('diagnostics_fail', [False, True])
+def test_failed_application_wait_collects_diagnostics_without_replacing_failure(diagnostics_fail):
+    reported = []
+    class Fake:
+        settings = SimpleNamespace(argo_namespace='argocd')
+        def get(self, *args, **kwargs):
+            return {'spec':{'source':{'targetRevision':'expected'}}}
+        def application_ready(self, *args, **kwargs):
+            return False
+        def wait(self, label, predicate):
+            assert predicate() is False
+            raise ConfigError('Timeout waiting for api')
+        def application_diagnostics(self, name, revision, **kwargs):
+            reported.append((name, revision, kwargs['credentials']))
+            if diagnostics_fail:
+                raise ConfigError('Diagnostics unavailable')
+    topology = SimpleNamespace(name='fixture', settings=SimpleNamespace(environment={'TOKEN':'synthetic-secret'}),
+                               data={'secrets':[{'values':{'token':'TOKEN'}}]})
+    inventory = {'selected':['api'], 'applications':{
+        'api':{'kind':'webservice','source':{'targetRevision':'expected'}}}}
+    with pytest.raises(ConfigError, match='Timeout waiting for api'):
+        wait_environment(Fake(), topology, inventory)
+    assert reported == [('api', 'expected', ['synthetic-secret'])]
+
+
 def test_verification_ignores_parent_and_test_health_but_checks_selected_services():
     calls=[]
     class Fake:

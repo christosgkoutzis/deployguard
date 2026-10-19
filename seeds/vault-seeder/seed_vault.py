@@ -29,8 +29,8 @@ services = ["python-backend", "ruby-gateway", "python-worker", "report-worker", 
 
 for svc in services:
     secret_data = {
-        'AWS_ACCESS_KEY_ID': 'admin',
-        'AWS_SECRET_ACCESS_KEY': os.getenv('MINIO_ROOT_PASSWORD', 'minio123'),
+        'AWS_ACCESS_KEY_ID': os.environ['S3_ACCESS_KEY_ID'],
+        'AWS_SECRET_ACCESS_KEY': os.environ['S3_SECRET_ACCESS_KEY'],
         'DB_URL': f"postgresql://postgres:{os.getenv('POSTGRES_PASSWORD', 'postgres')}@postgres:5432/postgres",
         'SEEDED_BY': 'DeployGuard Platform'
     }

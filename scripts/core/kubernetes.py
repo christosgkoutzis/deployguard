@@ -91,6 +91,47 @@ class Kubernetes:
                 synced.get('status') == 'Synced' and
                 (not health or status.get('health', {}).get('status') == 'Healthy'))
 
+    def application_diagnostics(self, name, revision=None, *, credentials=()):
+        """Report reconciliation state without dumping manifests or Secret data."""
+        obj = self.get('application', name, self.settings.argo_namespace, optional=True)
+        if not obj:
+            print('INFO: Application diagnostics: '+json.dumps({'name':name,'missing':True}), flush=True)
+            return
+        credentials = sorted({form for value in credentials if value
+                              for form in [value, json.dumps(value)[1:-1]]}, key=len, reverse=True)
+        def message(value):
+            value = value or ''
+            for credential in credentials:
+                value = value.replace(credential, '[REDACTED]')
+            return value[:2000]
+        def resource(value):
+            result = {key:value[key] for key in ['group','kind','namespace','name','status',
+                                                'hookPhase','syncPhase','requiresPruning'] if key in value}
+            if value.get('health'):
+                result['health'] = value['health'].get('status')
+            if value.get('message'):
+                result['message'] = message(value['message'])
+            return result
+        status = obj.get('status', {})
+        operation = status.get('operationState', {})
+        sync_result = operation.get('syncResult', {})
+        summary = {
+            'name':name, 'requestedRevision':revision,
+            'desiredRevision':obj.get('spec', {}).get('source', {}).get('targetRevision'),
+            'observedRevision':status.get('sync', {}).get('revision'),
+            'syncStatus':status.get('sync', {}).get('status'),
+            'health':status.get('health', {}).get('status'),
+            'pendingOperation':bool(obj.get('operation')),
+            'conditions':[{'type':condition.get('type'), 'message':message(condition.get('message', ''))}
+                          for condition in status.get('conditions', [])],
+            'operation':{**{key:operation[key] for key in ['phase','startedAt','finishedAt'] if key in operation},
+                         'message':message(operation.get('message', '')),
+                         'revision':sync_result.get('revision'),
+                         'resources':[resource(value) for value in sync_result.get('resources', [])]},
+            'resources':[resource(value) for value in status.get('resources', [])],
+        }
+        print('INFO: Application diagnostics: '+json.dumps(summary, sort_keys=True), flush=True)
+
     def refresh_secret_consumers(self, application, *, refreshed=None):
         """Adopt Secret versions during sync, without storing credential values."""
         obj = self.get('application', application, self.settings.argo_namespace, optional=True)

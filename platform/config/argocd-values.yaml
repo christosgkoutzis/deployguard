@@ -1,3 +1,7 @@
+redis:
+  image:
+    repository: docker.io/library/redis
+    tag: "7.2.8-alpine@sha256:c88ea2979a49ca497bbf7d39241b237f86c98e58cb2f6b1bc2dd167621f819bb"
 server:
   service:
     type: ClusterIP

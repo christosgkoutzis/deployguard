@@ -57,7 +57,9 @@ def application(settings, topology, name, source, wave, kind, automated=True):
                     'ignoreDifferences':[
                         {'group':'apps','kind':kind,'jsonPointers':[
                             '/metadata/annotations/deployguard.io~1secret-revision',
-                            '/spec/template/metadata/annotations/deployguard.io~1secret-revision']}
+                            '/spec/template/metadata/annotations/deployguard.io~1secret-revision'],
+                         'jqPathExpressions':[
+                             '.spec.template.metadata.annotations | select(. == {})']}
                         for kind in ['Deployment','StatefulSet']
                     ] + [{'group':'external-secrets.io','kind':'ExternalSecret',
                           'jsonPointers':['/metadata/annotations/force-sync']}]}}

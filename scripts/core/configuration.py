@@ -1,4 +1,4 @@
-"""Read configuration without sourcing shell code or changing process environment."""
+"""Checkout configuration, environment settings and tool versions."""
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ConfigError(ValueError):
-    """An actionable configuration error; never includes secret values."""
+    """Invalid environment or topology configuration."""
 
 
 @dataclass(frozen=True)

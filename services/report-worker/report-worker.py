@@ -1,6 +1,5 @@
 import os
 import time
-import json
 import boto3
 import csv
 import pika
@@ -86,7 +85,6 @@ def run_worker():
             print("INFO: Task completed and ACK sent.")
         except Exception as e:
             print(f"ERROR: Failed to process report: {e}")
-            # Requeue on failure
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
     channel.basic_qos(prefetch_count=1)

@@ -1,4 +1,4 @@
-"""CLI failure diagnostics, readiness scope and Secret rollout regression checks."""
+"""CLI failures, deployment readiness, operation isolation and Secret rollouts."""
 from copy import deepcopy
 from contextlib import nullcontext
 from http.client import RemoteDisconnected
@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from core.assessment import cli as assessment_cli
-from core.cli import apply_environment, failure_message, main, source_server, wait_environment, wait_initialization
+from core.cli import (apply_environment, clear_scenario, failure_message, load_inventory,
+                      main, operation_lock, source_server, sync, wait_environment, wait_initialization)
 from core.configuration import ConfigError
 from core.kubernetes import Kubernetes, SECRET_REVISION, secret_references
 
@@ -38,6 +39,105 @@ def test_cli_failure_reports_source_and_type_without_input_values(monkeypatch, c
 
 def test_configuration_errors_keep_their_actionable_message():
     assert failure_message(ConfigError('Unknown focus missing-service')) == 'Unknown focus missing-service'
+
+
+@pytest.mark.parametrize('observed_uid,condition,expected',[
+    ('requested','Complete',True),
+    ('requested',None,False),
+    ('requested','Failed','failed'),
+    ('requested','FailureTarget','failed'),
+    ('replacement','Complete','removed or replaced'),
+    (None,None,'removed or replaced'),
+])
+def test_job_result_belongs_to_the_requested_execution(monkeypatch,observed_uid,condition,expected):
+    kube=Kubernetes(SimpleNamespace())
+    obj=None if observed_uid is None else {'metadata':{'uid':observed_uid},'status':{
+        'conditions':[] if condition is None else [{'type':condition,'status':'True'}]}}
+    monkeypatch.setattr(kube,'get',lambda *args,**kwargs:obj)
+    if isinstance(expected,str):
+        with pytest.raises(ConfigError,match=expected):
+            kube.job_complete('checks',uid='requested')
+    else:
+        assert kube.job_complete('checks',uid='requested') is expected
+
+
+@pytest.mark.parametrize('field,value',[('context','other-context'),('namespace','other-namespace')])
+def test_inventory_rejects_a_different_target(tmp_path,field,value):
+    settings=SimpleNamespace(state=tmp_path,context='k3d-fixture',namespace='fixture')
+    inventory={'context':settings.context,'namespace':settings.namespace}
+    inventory[field]=value
+    (tmp_path/'inventory.json').write_text(json.dumps(inventory))
+    with pytest.raises(ConfigError,match='does not match'):
+        load_inventory(settings)
+
+
+@pytest.mark.parametrize('owner',[None,'another-environment','fixture'])
+def test_application_ownership_is_checked_before_adoption(monkeypatch,owner):
+    kube=Kubernetes(SimpleNamespace(argo_namespace='argocd'))
+    app={'metadata':{'labels':{} if owner is None else {'deployguard.io/environment':owner}}}
+    monkeypatch.setattr(kube,'get',lambda *args,**kwargs:app)
+    if owner=='fixture':
+        kube.owned_application('api','fixture')
+    else:
+        with pytest.raises(ConfigError,match='belongs to another environment'):
+            kube.owned_application('api','fixture')
+
+
+def test_sync_rejects_a_foreign_bootstrap_secret_before_building_or_applying(monkeypatch,tmp_path):
+    settings=SimpleNamespace(state=tmp_path,namespace='fixture')
+    topology=SimpleNamespace(settings=settings,name='fixture',select=lambda focus:[])
+    snapshot=SimpleNamespace(inventory_path=tmp_path/'inventory.json',
+                             bootstrap_secrets=lambda:[{'metadata':{'name':'credentials'}}])
+    class Fake:
+        def command(self,*args,**kwargs):
+            assert 'get' in args
+            return json.dumps({'metadata':{'labels':{'deployguard.io/environment':'another'}}})
+        def owned_application(self,*args):
+            pass
+        def apply(self,*args):
+            pytest.fail('Applied resources before checking Secret ownership')
+    def build(*args):
+        pytest.fail('Built images before checking Secret ownership')
+    monkeypatch.setattr('core.cli.doctor',lambda settings:None)
+    monkeypatch.setattr('core.cli.Snapshot',lambda topology:snapshot)
+    monkeypatch.setattr('core.cli.Kubernetes',lambda settings:Fake())
+    monkeypatch.setattr('core.cli.Builds',build)
+    with pytest.raises(ConfigError,match='bootstrap Secret is already owned'):
+        sync(topology)
+
+
+def test_operation_lock_rejects_overlap_and_releases_after_failure(tmp_path):
+    settings=SimpleNamespace(state=tmp_path/'state')
+    with pytest.raises(RuntimeError,match='interrupted operation'):
+        with operation_lock(settings):
+            with pytest.raises(ConfigError,match='already running'):
+                with operation_lock(settings):
+                    pytest.fail('Overlapping operation acquired the lock')
+            raise RuntimeError('interrupted operation')
+    with operation_lock(settings):
+        pass
+
+
+@pytest.mark.parametrize('skip_dependencies',[False,True])
+def test_clear_scenario_preserves_custom_files_and_can_retain_dependencies(tmp_path,skip_dependencies):
+    assets=['services/python-backend','seeds/vault-seeder',
+            'platform/dependencies/confluent-kafka-chart','platform/dependencies/rabbitmq-instance-chart']
+    for relative in [*assets,'services/custom-app']:
+        directory=tmp_path/relative
+        directory.mkdir(parents=True)
+        (directory/'content.txt').write_text(relative)
+    (tmp_path/'deployguard.yaml').write_text('topology remains in place\n')
+    settings=SimpleNamespace(root=tmp_path,state=tmp_path/'.local/state')
+    clear_scenario(settings,skip_dependencies)
+    backups=list((settings.state/'scenario-backups').iterdir())
+    assert len(backups)==1
+    for relative in assets:
+        retained=skip_dependencies and relative.startswith('platform/dependencies/')
+        assert (tmp_path/relative).exists() is retained
+        location=(tmp_path if retained else backups[0])/relative/'content.txt'
+        assert location.read_text()==relative
+    assert (tmp_path/'services/custom-app/content.txt').read_text()=='services/custom-app'
+    assert (tmp_path/'deployguard.yaml').read_text()=='topology remains in place\n'
 
 
 @pytest.mark.parametrize('connection_error', [ConnectionResetError, RemoteDisconnected])
@@ -220,6 +320,63 @@ def test_parent_termination_preserves_a_concurrently_started_operation_and_repor
     else:
         with pytest.raises(ConfigError,match='Patch rejected'):
             apply_environment(Fake(),root)
+
+
+@pytest.mark.parametrize('previous_state',[{}, {'phase':'Succeeded','syncResult':{'revision':'older'}}])
+def test_parent_waits_for_a_queued_obsolete_operation_before_terminating_it(previous_state):
+    root={'metadata':{'name':'fixture-environment'},'spec':{'source':{'targetRevision':'new'}}}
+    app={'operation':{'sync':{'revision':'old'}},'status':{'operationState':deepcopy(previous_state)}}
+    patches=[]
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd')
+        def apply(self,objects):
+            assert objects==[root]
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            patch=json.loads(args[args.index('-p')+1])
+            assert patch[0]['value']=='old'
+            assert patch[1]['value']=='Running'
+            patches.append(patch)
+            app['status']['operationState']['phase']='Terminating'
+        def wait(self,label,predicate):
+            assert predicate() is False
+            assert not patches
+            app['status']['operationState']={'phase':'Running','syncResult':{'revision':'old'}}
+            assert predicate() is False
+            assert len(patches)==1
+            app['operation']={'sync':{'revision':'new'}}
+            app['status']['operationState']={'phase':'Running','syncResult':{'revision':'new'}}
+            assert predicate() is True
+    apply_environment(Fake(),root)
+    assert len(patches)==1
+
+
+@pytest.mark.parametrize('terminal_phase',['Succeeded','Failed'])
+def test_initialization_waits_through_hook_retries_for_the_terminal_result(terminal_phase):
+    app={'spec':{'source':{'targetRevision':'requested'}},
+         'operation':{'sync':{'revision':'requested'}},
+         'status':{'operationState':{'phase':'Running','retryCount':1,'syncResult':{
+             'revision':'requested','resources':[{'kind':'Job','hookPhase':'Failed'}]}}}}
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd')
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            pytest.fail('A retrying operation was restarted')
+        def wait(self,label,predicate):
+            if label.endswith('scheduling'):
+                assert predicate() is True
+                return
+            assert predicate() is False
+            app['status']['operationState']['phase']=terminal_phase
+            app.pop('operation')
+            assert predicate() is True
+    if terminal_phase=='Failed':
+        with pytest.raises(ConfigError,match='Initialization failed for api'):
+            wait_initialization(Fake(),'api','requested')
+    else:
+        wait_initialization(Fake(),'api','requested')
 
 
 def test_initialization_waits_for_prior_operation_and_requests_the_exact_revision():

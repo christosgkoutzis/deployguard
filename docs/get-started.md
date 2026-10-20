@@ -101,7 +101,7 @@ Bootstrap creates namespaces, installs the pinned ArgoCD chart, and creates the 
 
 Sync builds the selected entities and verifies their deployment. Focus includes every prerequisite; unselected applications keep their deployed versions and do not block selected health checks. Add `--prune` to remove unselected applications and the resources they manage.
 
-ArgoCD keeps managed resources matched to the deployed configuration. Manual changes made with kubectl or the Kubernetes dashboard can be overwritten; edit your source or topology and sync to make a lasting change. ArgoCD also deletes managed resources removed from an application's chart or configuration after sync. This happens without `--prune`; that flag controls removal of whole unselected applications.
+ArgoCD keeps deployment resources matched to the deployed configuration. Manual changes made with kubectl or the Kubernetes dashboard can be overwritten; edit your source or topology and sync to make a lasting change. Test Applications synchronize requested revisions with automatic retries and self-healing disabled; use the test command to start another execution. ArgoCD also deletes managed resources removed from an application's chart or configuration after sync. This happens without `--prune`; that flag controls removal of whole unselected applications.
 
 Builds reuse Skaffold's cache. Service initialization runs on deployment syncs; platform seeds run when their inputs change. Tests run only through `./scripts/deployguard test <name>`. Run `./scripts/deployguard --help` to list commands.
 

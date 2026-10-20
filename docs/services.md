@@ -52,7 +52,7 @@ services:
     args: [--verbose]
 ```
 
-Command and args are container argument arrays. An init_command or INIT_COMMAND env entry defines an initialization hook; see [Seeds](seeds.md).
+Command and args are container argument arrays; repeated flags and arguments are allowed. For web services and workers, an init_command or INIT_COMMAND env entry defines an initialization hook; see [Seeds](seeds.md). Test programs handle their own preparation; validation rejects these initialization settings for test services.
 
 ## Secrets Management
 

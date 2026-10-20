@@ -41,11 +41,11 @@ def test_worker_has_no_http_configuration(tmp_path):
     assert values['externalSecret']['enabled'] is False
 
 
-def test_tests_register_suspended_and_rerun_explicitly(tmp_path):
+def test_tests_register_suspended(tmp_path):
     topology,snapshot=platform(tmp_path,[{'name':'checks','type':'test'}])
     item=topology.entities['checks'][1]
     assert snapshot.workload_values(item,snapshot.builds.artifacts(),'test')['suspended'] is True
-    assert snapshot.workload_values(item,snapshot.builds.artifacts(),'test','run-123')['suspended'] is False
+    assert snapshot.workload_values(item,snapshot.builds.artifacts(),'test')['runId'] == 'registered'
 
 
 def test_secret_values_cannot_enter_snapshots(tmp_path):
@@ -66,6 +66,13 @@ def test_child_health_order_is_declared(tmp_path):
     assert 'RespectIgnoreDifferences=true' in obj['spec']['syncPolicy']['syncOptions']
     assert all('secret-revision' in pointer or pointer.endswith('/force-sync')
                for entry in obj['spec']['ignoreDifferences'] for pointer in entry['jsonPointers'])
+
+
+def test_test_applications_require_explicit_new_executions(tmp_path):
+    topology,snapshot=platform(tmp_path,[{'name':'checks','type':'test'}])
+    obj=application(topology.settings,topology,'checks',{'repoURL':'http://local','targetRevision':'abc'},0,'test')
+    assert obj['spec']['syncPolicy']['retry']=={'limit':0}
+    assert obj['spec']['syncPolicy']['automated']=={'prune':True,'selfHeal':False}
 
 
 def fake_snapshots(monkeypatch, snapshot):
@@ -108,6 +115,18 @@ def test_snapshot_pins_payload_and_retains_unselected_apps(tmp_path, monkeypatch
     _, pruned = snapshot.create(topology.select('api'), prune=True)
     assert set(pruned['applications']) == {'api'}
     assert not (snapshot.repo/'applications/consumer.yaml').exists()
+
+
+@pytest.mark.parametrize('field',['environment','context','namespace'])
+def test_snapshot_rejects_state_from_a_different_environment(tmp_path,monkeypatch,field):
+    topology,snapshot=platform(tmp_path,[{'name':'api'}])
+    fake_snapshots(monkeypatch,snapshot)
+    snapshot.create(topology.select())
+    previous=json.loads(snapshot.inventory_path.read_text())
+    previous[field]='other-environment'
+    snapshot.inventory_path.write_text(json.dumps(previous))
+    with pytest.raises(ConfigError,match='belongs to another environment'):
+        snapshot.create(topology.select())
 
 
 def test_snapshot_registers_and_replaces_only_requested_test(tmp_path, monkeypatch):

@@ -1,8 +1,7 @@
-"""Validate and select a topology. This module never runs external commands."""
+"""Topology validation, dependency ordering and focused selection."""
 import hashlib
 import json
 from graphlib import CycleError, TopologicalSorter
-from pathlib import Path
 import re
 
 from dotenv import dotenv_values
@@ -39,7 +38,7 @@ def assignments(entries, label):
         key, value = entry.split('=', 1)
         if key in result:
             raise ConfigError(f'{label}: duplicate key {key}')
-        # Allow surrounding quotes in KEY=value entries.
+        # Matching quotes around assignment values are stripped.
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         result[key] = value
@@ -57,11 +56,10 @@ class Topology:
         schema = json.loads((settings.root / 'platform/config/topology.schema.json').read_text())
         errors = sorted(Draft202012Validator(schema).iter_errors(raw), key=lambda e: str(e.path))
         if errors:
-            # Schema messages can include literal input values; omit them to avoid leaking secrets.
+            # Validation errors identify the field and rule without echoing its value.
             error = errors[0]
             path = '.'.join(str(p) for p in error.path) or 'topology'
             raise ConfigError(f'{path}: invalid configuration ({error.validator})')
-        self.raw = raw
         self.data = substitute(raw, settings.environment)
         self.name = self.data.get('name', 'deployguard')
         self.entities = {}
@@ -92,7 +90,9 @@ class Topology:
             if category == 'services' or (category == 'seeds' and item.get('build_path')):
                 self.build_path(item)
             if category in ['services', 'seeds']:
-                self.environment(item)
+                environment = self.environment(item)
+                if item.get('type') == 'test' and ('init_command' in item or 'INIT_COMMAND' in environment):
+                    raise ConfigError(f'{name}: test services must prepare data inside their test program; initialization commands are unsupported')
             if category == 'mocks':
                 mappings = self.base / 'mocks' / name
                 files = sorted(mappings.glob('*.json'))

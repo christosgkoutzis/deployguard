@@ -1,4 +1,4 @@
-"""Offline Helm chart regression checks."""
+"""Helm rendering and workload configuration checks."""
 import subprocess
 
 import pytest

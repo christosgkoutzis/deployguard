@@ -1,4 +1,4 @@
-"""Installer safety and launcher forwarding checks; no network or cluster flows."""
+"""Checkout installation and command launcher checks."""
 import hashlib
 import json
 import shutil

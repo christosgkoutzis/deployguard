@@ -1,5 +1,6 @@
-"""Static code checks and runner-only functional acceptance assessments."""
+"""Static validation and CI assessments of deployment behavior."""
 import ast
+import base64
 import hashlib
 import json
 import os
@@ -87,6 +88,35 @@ def inventory():
 def image(kube,name):
     return kube.get('deployment',name+'-workload')['spec']['template']['spec']['containers'][0]['image']
 
+
+def refresh_scenario_secret(kube):
+    namespace=kube.settings.namespace
+    original=base64.b64decode(kube.get('secret','python-backend-secret')['data']['SEEDED_BY']).decode()
+    marker='ci-secret-refresh-'+os.urandom(12).hex()
+    before=kube.get('deployment','python-backend-workload')['spec']['template']
+    def update(value):
+        kube.command('-n',namespace,'exec','vault-0','--','/bin/sh','-ec',
+                     'export VAULT_ADDR=http://127.0.0.1:8200; '
+                     'export VAULT_TOKEN="$(cat /vault/userconfig/bootstrap/token)"; '
+                     'vault kv patch -mount=secret deployguard/python-backend "SEEDED_BY=$1" >/dev/null',
+                     'vault-secret-update',value,capture=True)
+    def observed():
+        return kube.command('-n',namespace,'exec','deployment/python-backend-workload','--',
+                            'python','-c','import os; print(os.environ["SEEDED_BY"])',capture=True).strip()
+    try:
+        update(marker)
+        cli('sync','--focus','python-backend')
+        value=base64.b64decode(kube.get('secret','python-backend-secret')['data']['SEEDED_BY']).decode()
+        assert value==marker, 'Vault change did not reach the ESO-managed Secret'
+        assert kube.get('deployment','python-backend-workload')['spec']['template']!=before, 'Vault change did not roll the consumer'
+        assert observed()==marker, 'The running consumer retained the previous Vault value'
+    finally:
+        update(original)
+        cli('sync','--focus','e2e-tests')
+        assert observed()==original, 'The restored Vault value did not reach the running consumer'
+    print('SUCCESS: Vault changes reached ESO and the running consumer; original value restored')
+
+
 def scenario(mode):
     settings=Settings.load()
     topology=Topology(settings)
@@ -103,10 +133,11 @@ def scenario(mode):
     assert {a['metadata']['name'] for a in apps}==set(selected)|{topology.name+'-environment'}
     if mode=='focused':
         assert 'dozzle' not in selected and 'kafbat-ui' not in selected
+        refresh_scenario_secret(kube)
     for key in ['VAULT_ROOT_TOKEN','POSTGRES_PASSWORD','S3_SECRET_ACCESS_KEY','RABBITMQ_PASSWORD',
                 'REDIS_PASSWORD','ELASTIC_PASSWORD']:
         value=settings.environment[key]
-        # Scan every committed generated revision, not just the latest tree.
+        # Credential checks cover the generated repository's full commit history.
         revisions=subprocess.run(['git','rev-list','--all'],cwd=ROOT/'.local/state/repository',
                                  check=True,capture_output=True,text=True).stdout.splitlines()
         for revision in revisions:
@@ -143,7 +174,7 @@ def _generic(base):
     first_uid = kube.get('job','fixture-tests-workload')['metadata']['uid']
     command('test','fixture-tests')
     assert kube.get('job','fixture-tests-workload')['metadata']['uid'] != first_uid, 'Test execution reused an old Job'
-    # A test run must leave other deployments and completed suites untouched.
+    # Each test execution preserves other Applications and completed Jobs.
     command('test','fixture-other-tests')
     other_uid=kube.get('job','fixture-other-tests-workload')['metadata']['uid']
     before=inventory()
@@ -153,7 +184,7 @@ def _generic(base):
     for name,entry in before['applications'].items():
         if name!='fixture-tests':
             assert after['applications'][name]['source']==entry['source'], 'Test changed another source revision'
-    # Change a Secret input and require a consumer rollout and adoption of its value.
+    # Secret updates reach running containers through a rollout.
     changed_password='changed-ci-fixture-credential'
     before=kube.get('deployment','fixture-api-workload')['spec']['template']
     command('sync',environment={'FIXTURE_PASSWORD':changed_password})
@@ -161,7 +192,7 @@ def _generic(base):
     with urllib.request.urlopen(f'http://fixture-api.{settings.domain}:{settings.ingress_port}/data',timeout=10) as response:
         assert json.load(response)['secret_digest']==hashlib.sha256(changed_password.encode()).hexdigest()
     command('sync')
-    # Editing mappings must update live WireMock behavior, not only the ConfigMap.
+    # Mapping changes take effect in the running mock server.
     mapping=base/'mocks/fixture-mock/mapping.json'
     original_mapping=mapping.read_text()
     try:
@@ -174,7 +205,7 @@ def _generic(base):
     finally:
         mapping.write_text(original_mapping)
     command('sync')
-    # Make an unrelated retained app unhealthy through an ArgoCD-owned source.
+    # Focus succeeds while a retained, unselected worker remains unhealthy.
     data=yaml.safe_load((base/'topology.yaml').read_text())
     data['services'][1]['command']=['/bin/sh','-c','exit 29']
     failure=base/'unrelated-failure.yaml'
@@ -191,7 +222,7 @@ def _generic(base):
         assert inventory()['applications']['fixture-worker']['source']==retained_source, 'Focus changed the retained worker inventory'
         assert worker, 'Focus removed the retained worker Application'
         worker_source=worker['spec']['source']
-        # ArgoCD's JSON serialization omits an empty Helm parameter list.
+        # ArgoCD's API omits empty Helm parameter lists.
         worker_source.setdefault('helm',{}).setdefault('parameters',[])
         assert worker_source==retained_source, 'Focus changed retained worker source fields: '+', '.join(
             sorted(key for key in worker_source.keys() | retained_source.keys()
@@ -234,9 +265,17 @@ def _generic(base):
     retry_topology.write_text(yaml.safe_dump(data))
     try:
         command('sync','--topology',str(retry_topology))
+        registered=kube.get('job','fixture-tests-workload')
+        environment=registered['spec']['template']['spec']['containers'][0].get('env',[])
+        assert registered['spec']['suspend'] is True, 'Retry assessment ran before the test command'
+        assert any(e['name']=='FAIL_ONCE' and e.get('value')=='1' for e in environment), 'Retry assessment failure input was not deployed'
         command('test','fixture-tests','--topology',str(retry_topology),expected=1)
-        failed_uid=kube.get('job','fixture-tests-workload')['metadata']['uid']
+        failed=kube.get('job','fixture-tests-workload')
+        assert any(c['type'] in ['Failed','FailureTarget'] and c['status']=='True'
+                   for c in failed.get('status',{}).get('conditions',[])), 'First test execution did not retain its failed Job'
+        failed_uid=failed['metadata']['uid']
         command('verify','--topology',str(retry_topology))
+        assert kube.get('job','fixture-tests-workload')['metadata']['uid']==failed_uid, 'Verification replaced the failed test execution'
         command('test','fixture-tests','--topology',str(retry_topology))
         assert kube.get('job','fixture-tests-workload')['metadata']['uid']!=failed_uid
     finally:

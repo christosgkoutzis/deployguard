@@ -10,9 +10,7 @@
       ]
     },
     "name": {
-      "type": "string",
-      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-      "maxLength": 40
+      "$ref": "#/$defs/entityName"
     },
     "dependencies": {
       "type": "array",
@@ -20,18 +18,10 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-            "maxLength": 40
+            "$ref": "#/$defs/entityName"
           },
           "depends_on": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-              "maxLength": 40
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/entityNames"
           },
           "repo": {
             "type": "string",
@@ -50,12 +40,7 @@
             "minLength": 1
           },
           "set": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/assignments"
           },
           "values": {
             "type": "object"
@@ -91,60 +76,19 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-            "maxLength": 40
+            "$ref": "#/$defs/entityName"
           },
           "depends_on": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-              "maxLength": 40
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/entityNames"
           },
           "env": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/assignments"
           },
           "secret_env": {
-            "type": "object",
-            "propertyNames": {
-              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-            },
-            "additionalProperties": {
-              "type": "object",
-              "required": [
-                "name",
-                "key"
-              ],
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-                  "maxLength": 40
-                },
-                "key": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "additionalProperties": false
-            }
+            "$ref": "#/$defs/secretEnvironment"
           },
           "env_from": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-              "maxLength": 40
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/entityNames"
           },
           "type": {
             "enum": [
@@ -171,66 +115,13 @@
             "pattern": "^/"
           },
           "resources": {
-            "type": "object",
-            "properties": {
-              "requests": {
-                "type": "object",
-                "properties": {
-                  "cpu": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "memory": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "ephemeral-storage": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              "limits": {
-                "type": "object",
-                "properties": {
-                  "cpu": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "memory": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "ephemeral-storage": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": false
+            "$ref": "#/$defs/resources"
           },
           "external_secret": {
             "type": "object",
             "properties": {
               "store": {
-                "type": "string",
-                "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-                "maxLength": 40
+                "$ref": "#/$defs/entityName"
               },
               "path": {
                 "type": "string",
@@ -252,8 +143,7 @@
             "items": {
               "type": "string",
               "minLength": 1
-            },
-            "uniqueItems": true
+            }
           },
           "args": {
             "type": "array",
@@ -273,13 +163,7 @@
       }
     },
     "mocks": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-        "maxLength": 40
-      },
-      "uniqueItems": true
+      "$ref": "#/$defs/entityNames"
     },
     "seeds": {
       "type": "array",
@@ -287,60 +171,19 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-            "maxLength": 40
+            "$ref": "#/$defs/entityName"
           },
           "depends_on": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-              "maxLength": 40
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/entityNames"
           },
           "env": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/assignments"
           },
           "secret_env": {
-            "type": "object",
-            "propertyNames": {
-              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-            },
-            "additionalProperties": {
-              "type": "object",
-              "required": [
-                "name",
-                "key"
-              ],
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-                  "maxLength": 40
-                },
-                "key": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "additionalProperties": false
-            }
+            "$ref": "#/$defs/secretEnvironment"
           },
           "env_from": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-              "maxLength": 40
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/entityNames"
           },
           "image": {
             "type": "string",
@@ -363,58 +206,7 @@
             "minLength": 1
           },
           "resources": {
-            "type": "object",
-            "properties": {
-              "requests": {
-                "type": "object",
-                "properties": {
-                  "cpu": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "memory": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "ephemeral-storage": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              "limits": {
-                "type": "object",
-                "properties": {
-                  "cpu": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "memory": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  },
-                  "ephemeral-storage": {
-                    "type": [
-                      "string",
-                      "number"
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": false
+            "$ref": "#/$defs/resources"
           },
           "timeout": {
             "type": "integer",
@@ -446,9 +238,7 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-            "maxLength": 40
+            "$ref": "#/$defs/entityName"
           },
           "values": {
             "type": "object",
@@ -472,9 +262,7 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-            "maxLength": 40
+            "$ref": "#/$defs/entityName"
           },
           "server": {
             "type": "string",
@@ -485,32 +273,10 @@
             "minLength": 1
           },
           "token_secret": {
-            "type": "object",
-            "required": [
-              "name",
-              "key"
-            ],
-            "properties": {
-              "name": {
-                "type": "string",
-                "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-                "maxLength": 40
-              },
-              "key": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "additionalProperties": false
+            "$ref": "#/$defs/secretReference"
           },
           "depends_on": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-              "maxLength": 40
-            },
-            "uniqueItems": true
+            "$ref": "#/$defs/entityNames"
           }
         },
         "required": [
@@ -523,5 +289,89 @@
     }
   },
   "required": [],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "entityName": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "maxLength": 40
+    },
+    "entityNames": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entityName"
+      },
+      "uniqueItems": true
+    },
+    "assignments": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "secretReference": {
+      "type": "object",
+      "required": [
+        "name",
+        "key"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/entityName"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretEnvironment": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/secretReference"
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "$ref": "#/$defs/resourceQuantities"
+        },
+        "limits": {
+          "$ref": "#/$defs/resourceQuantities"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceQuantities": {
+      "type": "object",
+      "properties": {
+        "cpu": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "memory": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "ephemeral-storage": {
+          "type": [
+            "string",
+            "number"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

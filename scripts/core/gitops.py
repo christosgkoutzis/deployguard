@@ -17,7 +17,7 @@ IGNORE_HEALTH = 'argocd.argoproj.io/ignore-healthcheck'
 
 
 def copy_chart(source, destination, ancestors=()):
-    """Vendor local file dependencies without editing the source checkout."""
+    """Copy a local chart and its vendored dependencies into a deployment snapshot."""
     source = source.resolve()
     if source in ancestors:
         raise ConfigError("Recursive local chart dependency")
@@ -25,7 +25,7 @@ def copy_chart(source, destination, ancestors=()):
     shutil.copytree(source, destination, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns('charts', '*.tgz', '__pycache__',
                                                  '.git', '.env', '.local', '.venv', '.tools', '.deployguard'))
-    # Copy vendored content first so declared local subcharts replace stale copies.
+    # Vendored subcharts are copied before resolving file:// overrides.
     if (source / 'charts').exists():
         shutil.copytree(source / 'charts', destination / 'charts', dirs_exist_ok=True)
     chart = yaml.safe_load((source / 'Chart.yaml').read_text())
@@ -39,12 +39,13 @@ def copy_chart(source, destination, ancestors=()):
         copy_chart(dep_source, destination / 'charts' / dep['name'], ancestors)
 
 
-def application(settings, topology, name, source, wave, kind, automated=True):
+def application(settings, topology, name, source, wave, kind):
     policy = {'syncOptions': ['CreateNamespace=true', 'RespectIgnoreDifferences=true'], 'retry': {'limit': 3,
-               'backoff': {'duration':'5s','factor':2,'maxDuration':'1m'}}}
-    if automated:
-        # Pruning resources inside a selected app is separate from pruning unselected apps.
-        policy['automated'] = {'prune': True, 'selfHeal': True}
+               'backoff': {'duration':'5s','factor':2,'maxDuration':'1m'}},
+              'automated': {'prune': True, 'selfHeal': True}}
+    if kind == 'test':
+        policy['retry'] = {'limit': 0}
+        policy['automated']['selfHeal'] = False
     return {'apiVersion':'argoproj.io/v1alpha1', 'kind':'Application',
             'metadata': {'name':name, 'namespace':settings.argo_namespace,
                          'labels':{OWNER:topology.name, 'deployguard.io/type':kind},
@@ -53,7 +54,7 @@ def application(settings, topology, name, source, wave, kind, automated=True):
             'spec':{'project':topology.name, 'source':source,
                     'destination':{'server':'https://kubernetes.default.svc','namespace':settings.namespace},
                     'syncPolicy':policy,
-                    # Only sync-time rollout/refresh markers are owned outside Git.
+                    # Secret refresh and rollout annotations are managed during sync.
                     'ignoreDifferences':[
                         {'group':'apps','kind':kind,'jsonPointers':[
                             '/metadata/annotations/deployguard.io~1secret-revision',
@@ -84,7 +85,7 @@ class Snapshot:
         return values
 
 
-    def workload_values(self, item, artifacts, kind, run_id=None):
+    def workload_values(self, item, artifacts, kind):
         name = item['name']
         image = item.get('image') or artifacts.get(name)
         if not image:
@@ -106,7 +107,7 @@ class Snapshot:
                            'ingress':{'host':f'{name}.{self.settings.domain}'},
                            'health':{'path':item.get('health_endpoint','/health')}})
         if kind == 'test':
-            values.update({'suspended':run_id is None, 'runId':run_id or 'registered'})
+            values.update({'suspended':True, 'runId':'registered'})
         return values
 
     def no_secrets(self, value):
@@ -129,7 +130,7 @@ class Snapshot:
 
     def commit(self, message):
         run(['git','add','--all'], cwd=self.repo)
-        # No source repository configuration or hooks are inherited.
+        # Generated snapshots use a dedicated Git identity and disabled commit hooks.
         run(['git','-c','user.name=DeployGuard','-c','user.email=local@deployguard.invalid',
              '-c','core.hooksPath=/dev/null','-c','commit.gpgsign=false','commit','--allow-empty','-m',message],
             cwd=self.repo, capture=True)
@@ -148,7 +149,6 @@ class Snapshot:
             raise ConfigError('Generated state belongs to another environment; use a separate checkout')
         artifacts = self.builds.artifacts()
         entries = {} if prune else previous.get('applications', {}).copy()
-        # All pending content lives in the dedicated generated repository, never application source.
         for name in selected:
             category, item = self.topology.entities[name]
             print(f'INFO: Generating deployment configuration for {name}', flush=True)
@@ -164,8 +164,6 @@ class Snapshot:
                     'path':f'payload/stores/{name}'},'wave':self.topology.levels[name]}
                 continue
             if category == 'dependencies' and not item.get('path'):
-                if any(c in item['version'] for c in '*<>=~^'):
-                    raise ConfigError(f'{name}: pin an exact Helm chart version')
                 values = self.dependency_values(item)
                 parameters = [{'name':k,'value':v} for k,v in assignments(item.get('set',[]),name).items()]
                 self.no_secrets({'values':values,'parameters':parameters})
@@ -231,20 +229,13 @@ class Snapshot:
             write_yaml(path, retained)
         print('INFO: Recording environment Applications in Git', flush=True)
         revision = self.commit('Update environment applications')
-        root = application(self.settings,self.topology,f'{self.topology.name}-environment',
-                           {'repoURL':self.settings.source_url,'targetRevision':revision,'path':'applications'},
-                           0,'environment')
-        # Child apps live in the ArgoCD namespace, unlike ordinary workloads.
-        root['spec']['destination']['namespace'] = self.settings.argo_namespace
-        write_yaml(self.settings.state/'root-application.yaml',root)
         inventory = {'environment':self.topology.name,'context':self.settings.context,
                      'namespace':self.settings.namespace,'revision':revision,'selected':selected,
                      'applications':entries,'topology':str(self.settings.topology),'topology_digest':self.topology.signature}
-        self.inventory_path.write_text(json.dumps(inventory,indent=2)+'\n')
-        return root, inventory
+        return self.save_environment(inventory)
 
     def run_test(self, name, run_id):
-        """Change one execution while reusing its committed chart and image."""
+        """Record a test execution using its deployed chart, configuration and image."""
         inventory = json.loads(self.inventory_path.read_text())
         entry = inventory['applications'][name]
         path = f'payload/values/{name}.yaml'
@@ -252,7 +243,6 @@ class Snapshot:
                                     cwd=self.repo,capture=True))
         values.update({'suspended':False,'runId':run_id})
         write_yaml(self.repo/path,values)
-        # Preserve the exact deployed chart even if the working tree was edited.
         run(['git','restore','--source',entry['source']['targetRevision'],'--',entry['source']['path']],
             cwd=self.repo,capture=True)
         entry['source']['targetRevision'] = self.commit(f'Run test {name}')
@@ -267,6 +257,9 @@ class Snapshot:
                 annotations[IGNORE_HEALTH] = 'true'
             write_yaml(path, obj)
         inventory['revision'] = self.commit(f'Execute test {name}')
+        return self.save_environment(inventory)
+
+    def save_environment(self, inventory):
         root = application(self.settings,self.topology,f'{self.topology.name}-environment',
                            {'repoURL':self.settings.source_url,'targetRevision':inventory['revision'],
                             'path':'applications'},0,'environment')

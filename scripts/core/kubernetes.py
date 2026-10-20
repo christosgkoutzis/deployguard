@@ -192,8 +192,10 @@ class Kubernetes:
                              '--timeout', f'{self.settings.timeout}s')
         return True
 
-    def job_complete(self, name):
+    def job_complete(self, name, *, uid=None):
         obj = self.get('job', name, optional=True)
+        if uid is not None and (not obj or obj['metadata']['uid'] != uid):
+            raise ConfigError(f'Job {name} execution was removed or replaced')
         if not obj:
             return False
         conditions = obj.get('status', {}).get('conditions', [])

@@ -1,1 +1,1 @@
-"""Internal implementation of the DeployGuard command."""
+"""DeployGuard command implementation."""

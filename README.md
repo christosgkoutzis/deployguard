@@ -65,4 +65,4 @@ CI checks the documented behavior, the full demo, focused deployment, and a sepa
 
 ## License
 
-This project is under the MIT License.
+This project is under the [MIT License](LICENSE).

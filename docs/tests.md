@@ -19,6 +19,8 @@ services:
 
 Declare the referenced entities in the same topology. Sync registers a suspended Job without a readiness probe, Service, or Ingress. A successful deployment does not imply successful test execution.
 
+Keep test data preparation inside the test program or its entry point. Test services do not support `init_command` or `INIT_COMMAND`; validation rejects these settings.
+
 ## Running Verification Checks
 
 ```bash
@@ -29,7 +31,7 @@ Verification reads `.local/state/inventory.json`, confirms the topology has not 
 
 Sync verifies automatically; the separate command rechecks later. Retained unselected applications do not block verification or the parent Application's sync waves; their own health status remains visible in ArgoCD. Selected applications must reach the requested revision and pass their health checks. Test Job outcomes are checked by the test command and do not block deployment verification.
 
-Sync publishes a snapshot for ArgoCD to reconcile automatically. If the parent Application is still synchronizing an older revision, DeployGuard requests its termination through ArgoCD before waiting for the requested snapshot. This lets a focused sync proceed after an unrelated application fails.
+Sync publishes a snapshot for ArgoCD to reconcile automatically. DeployGuard waits for and stops older queued or running parent synchronizations through ArgoCD before waiting for the requested snapshot. This lets a focused sync proceed after an unrelated application fails.
 
 ## Running Test Suites
 
@@ -39,7 +41,7 @@ Sync publishes a snapshot for ArgoCD to reconcile automatically. If the parent A
 ./scripts/deployguard test e2e-tests
 ```
 
-Each execution creates a new run ID in the generated snapshot. ArgoCD replaces the Job, and the runner waits for that execution before following logs. Success requires `Complete=True` on the Kubernetes Job. Failed Jobs and timeouts return nonzero status; Running pods and previously completed Jobs cannot satisfy it. Repeat the test command to rerun a suite, including after a failed execution. Sync alone registers suspended Jobs.
+Each execution creates a new run ID in the generated snapshot. ArgoCD replaces the Job, and the runner waits for that Job's unique identity before following logs. Success requires `Complete=True` on that same Job. Failed Jobs, removed or replaced executions, and timeouts return nonzero status; Running pods and previously completed Jobs cannot satisfy it. Test Applications disable automatic sync retries and self-healing, and test Jobs use zero retries. Repeat the test command to rerun a suite, including after a failed execution. Sync alone registers suspended Jobs.
 
 Test names must be declared and selected in the last sync. The runner verifies that suite's prerequisites and reuses its deployed chart, configuration, and image. Other application revisions and test executions remain unchanged. Source or environment edits need another sync before execution.
 
@@ -51,14 +53,16 @@ Each test job uses a separate runner. The "Check out repository" step fetches th
 
 | Job | Coverage |
 | --- | --- |
-| `static-and-unit-tests` | Python/shell/JSON/YAML syntax, schema validity, unit tests, offline Helm rendering, demo and fixture topology validation; runs once |
-| `end-to-end-tests` | The included services' HTTP, database, messaging, cache, search and CSV export flows, including signed downloads and rejection of unsigned downloads; one bootstrap, focused deployment followed by full expansion on the same cluster, deployment health, build and Application inventory, generated Git credential scan, repeated sync and tests |
+| `static-and-unit-tests` | Python/shell/JSON/YAML syntax, schema validity, unit tests, offline Helm rendering, demo and fixture topology validation; ownership and target isolation, operation locking, safe demo cleanup, queued sync handling, initialization retries and configuration validation; runs once |
+| `end-to-end-tests` | The included services' HTTP, database, messaging, cache, search and CSV export flows, including signed downloads and rejection of unsigned downloads; one bootstrap, focused deployment followed by full expansion on the same cluster, deployment health, build and Application inventory, Vault/ESO value propagation and consumer rollout, generated Git credential scan, repeated sync and tests |
 | `deployment-lifecycle-tests` | Custom paths/ports/health/env files, optional Vault, Secret references, workers without HTTP, seeds, mocks, repeated Jobs, changed source updating images, focus retention/pruning, failing initialization, missing charts, failed-test retries, unhealthy retained apps, Secret updates, mapping updates, isolated test execution |
 | `all-tests-passed` | Collects the other jobs' results and fails if any failed, was cancelled or was skipped; runs no tests itself |
 
 End-to-end tests bootstrap one cluster, deploy and verify the focused environment, and run its suites and repeated sync/test checks. Only after those steps pass does the job expand to the full topology and repeat verification and tests. The full stage reuses the cluster and build cache. A focused-stage failure skips full expansion; failure diagnostics and cleanup still run.
 
 Each functional job bootstraps its own cluster once. The E2E job covers the demo with Vault and ESO; the lifecycle job covers an independent application without them. Sync includes verification, so the workflow does not immediately run verification again. The lifecycle assessment owns its repeated test executions; the workflow does not repeat them beforehand. Repeated syncs and test executions exercise idempotency and new Job creation.
+
+The focused assessment changes the demo's noncredential `SEEDED_BY` value in Vault, syncs the backend, and checks the ESO-managed Secret, consumer rollout, and container environment. It then restores the value and syncs the focused test selection before running the integration suite. This uses the same cluster and leaves the demo's credentials and request flows intact.
 
 The initialization-failure assessment observes new hook pods while sync runs and requires exit code 37 and an explicit initialization or ArgoCD sync failure. It uses the configured command wait to allow ArgoCD's retries to finish. A timeout or a failure from a previous pod cannot satisfy it.
 

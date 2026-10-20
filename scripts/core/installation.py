@@ -1,4 +1,4 @@
-"""Explicit checkout-local installation using Python's standard library only."""
+"""Install Python dependencies and pinned tools inside the checkout."""
 import argparse
 import hashlib
 import os
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class InstallError(ValueError):
-    """An installation prerequisite or integrity check failed."""
+    """A prerequisite or downloaded tool failed validation."""
 
 
 def run(arguments, **kwargs):
@@ -92,7 +92,7 @@ def install_tools(root, system, architecture):
 
 
 def create_configuration(root):
-    """Create an example only when absent, including under concurrent installs."""
+    """Create .env from the example while preserving existing configuration."""
     example = (root/'.env.example').read_bytes()
     try:
         descriptor = os.open(root/'.env', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

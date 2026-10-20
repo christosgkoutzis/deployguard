@@ -1,6 +1,5 @@
-"""Pure platform contract checks. CI runs these without Docker or Kubernetes."""
+"""Topology validation and dependency selection checks."""
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 import yaml
@@ -95,3 +94,30 @@ def test_unknown_secret_reference_fails(environment):
 def test_missing_env_file_fails(environment):
     with pytest.raises(ConfigError,match='env_file'):
         environment({'services':[{'name':'api','env_file':'.missing'}]})
+
+
+def test_command_preserves_repeated_flags_and_arguments(environment):
+    command=['python','-W','ignore','-W','default::DeprecationWarning','app.py']
+    topology=environment({'services':[{'name':'api','command':command,'args':['same','same']}]})
+    assert topology.entities['api'][1]['command']==command
+    assert topology.entities['api'][1]['args']==['same','same']
+
+
+@pytest.mark.parametrize('configuration',[
+    {'init_command':'python prepare.py'},
+    {'env':['INIT_COMMAND=python prepare.py']},
+    {'env_file':'test.env'},
+])
+def test_test_services_reject_separate_initialization(environment,tmp_path,configuration):
+    directory=tmp_path/'tests/checks'
+    directory.mkdir(parents=True)
+    (directory/'test.env').write_text('INIT_COMMAND=python prepare.py\n')
+    with pytest.raises(ConfigError,match='prepare data inside their test program'):
+        environment({'services':[{'name':'checks','type':'test',**configuration}]})
+
+
+@pytest.mark.parametrize('version',['latest','1.2','1.2.x','>=1.0.0','~1.2.3'])
+def test_remote_chart_requires_an_exact_version(environment,version):
+    with pytest.raises(ConfigError,match='exact Helm chart version'):
+        environment({'dependencies':[{'name':'db','repo':'https://example.invalid',
+                                     'chart':'db','version':version}]})

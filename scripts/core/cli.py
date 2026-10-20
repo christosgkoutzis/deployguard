@@ -1,4 +1,4 @@
-"""Explicit commands: importing this module never builds or changes a cluster."""
+"""Local environment setup, deployment, verification and test commands."""
 import argparse
 from contextlib import contextmanager
 import fcntl
@@ -79,7 +79,7 @@ def bootstrap(topology):
 
 def source_server(settings, environment):
     name = f'deployguard-source-{settings.cluster}'
-    # Docker's JSON format emits one object per line, not a JSON array.
+    # Docker returns one JSON object per container.
     listing = run(['docker','container','ls','--all','--format','{{json .}}'],capture=True)
     exists = any(json.loads(line)['Names'] == name for line in listing.splitlines())
     source = str(settings.state/'repository/.git')
@@ -125,7 +125,7 @@ def wait_environment(kube, topology, inventory, selected=None, *, refresh=False)
         except ConfigError:
             report_application_failure(kube, topology, name, entry['source']['targetRevision'])
             raise
-    # The parent must apply this revision; unrelated child health cannot gate focus or retries.
+    # Parent synchronization is checked independently of unselected child health.
     kube.wait('parent configuration',lambda:kube.application_ready(
         f'{topology.name}-environment',inventory['revision'],health=False))
 
@@ -171,31 +171,40 @@ def apply_environment(kube, root):
     kube.apply([root])
     def obsolete_operation():
         obj = kube.get('application', name, kube.settings.argo_namespace)
+        pending = obj.get('operation')
+        if not pending:
+            return None
         state = obj.get('status', {}).get('operationState', {})
         active_revision = state.get('syncResult', {}).get('revision')
-        if (obj.get('operation') and active_revision and active_revision != revision and
-                state.get('phase') in ['Running', 'Terminating']):
+        if active_revision and state.get('phase') in ['Running', 'Terminating']:
+            return state if active_revision != revision else None
+        if pending.get('sync', {}).get('revision') not in [None, revision]:
             return state
         return None
     state = obsolete_operation()
-    if not state:
+    if state is None:
         return
     print(f'INFO: Waiting for superseded parent synchronization to stop: {name}', flush=True)
-    if state['phase'] == 'Running':
-        patch = [
-            {'op':'test', 'path':'/status/operationState/syncResult/revision',
-             'value':state['syncResult']['revision']},
-            {'op':'test', 'path':'/status/operationState/phase', 'value':'Running'},
-            {'op':'replace', 'path':'/status/operationState/phase', 'value':'Terminating'},
-        ]
-        try:
-            kube.command('-n', kube.settings.argo_namespace, 'patch', 'application', name,
-                         '--type', 'json', '-p', json.dumps(patch), capture=True)
-        except ConfigError:
-            current = obsolete_operation()
-            if current and current['phase'] == 'Running':
-                raise
-    kube.wait('superseded parent sync termination', lambda: not obsolete_operation())
+    def stopped():
+        state = obsolete_operation()
+        if state is None:
+            return True
+        if state.get('phase') == 'Running' and state.get('syncResult', {}).get('revision'):
+            patch = [
+                {'op':'test', 'path':'/status/operationState/syncResult/revision',
+                 'value':state['syncResult']['revision']},
+                {'op':'test', 'path':'/status/operationState/phase', 'value':'Running'},
+                {'op':'replace', 'path':'/status/operationState/phase', 'value':'Terminating'},
+            ]
+            try:
+                kube.command('-n', kube.settings.argo_namespace, 'patch', 'application', name,
+                             '--type', 'json', '-p', json.dumps(patch), capture=True)
+            except ConfigError:
+                current = obsolete_operation()
+                if current and current.get('phase') == 'Running' and current.get('syncResult', {}).get('revision'):
+                    raise
+        return obsolete_operation() is None
+    kube.wait('superseded parent sync termination', stopped)
 
 
 def sync(topology, focus=None, prune=False):
@@ -210,13 +219,11 @@ def sync(topology, focus=None, prune=False):
             raise ConfigError('Generated state belongs to another environment; use a separate checkout')
         previous_applications = set(existing['applications'])
     settings.state.mkdir(parents=True,exist_ok=True)
-    # Secret-bearing or floating dependency parameters are rejected before builds.
+    # Generated configuration contains Secret references rather than credential values.
     for name in selected:
         category,item = topology.entities[name]
         if category == 'dependencies':
             snapshot.no_secrets({'set':item.get('set',[]),'values':snapshot.dependency_values(item)})
-            if not item.get('path') and any(c in item['version'] for c in '*<>=~^'):
-                raise ConfigError(f'{name}: exact dependency chart version required')
         if category in ['services','seeds']:
             snapshot.no_secrets(topology.environment(item))
     kube = Kubernetes(settings)
@@ -228,7 +235,7 @@ def sync(topology, focus=None, prune=False):
                            '--ignore-not-found','-o','json',capture=True)
         if raw and json.loads(raw).get('metadata',{}).get('labels',{}).get(OWNER) != topology.name:
             raise ConfigError('A bootstrap Secret is already owned outside this environment')
-    # Record existing consumers before credentials change; no restart on first observation.
+    # Secret versions are recorded before applying credential updates.
     for name in selected:
         kube.refresh_secret_consumers(name)
     kube.apply(snapshot.bootstrap_secrets())
@@ -307,19 +314,24 @@ def test(topology, name):
     run_id = uuid.uuid4().hex
     root,inventory = snapshot.run_test(name,run_id)
     apply_environment(kube, root)
+    execution_uid = None
     def current_job():
+        nonlocal execution_uid
         raw = kube.command('-n',settings.namespace,'get','job',job,
                            '--ignore-not-found','-o','json',capture=True)
         if not raw:
             return False
         obj = json.loads(raw)
-        return obj.get('spec',{}).get('template',{}).get('metadata',{}).get('annotations',{}).get('deployguard.io/run-id') == run_id
+        if obj.get('spec',{}).get('template',{}).get('metadata',{}).get('annotations',{}).get('deployguard.io/run-id') != run_id:
+            return False
+        execution_uid = obj['metadata']['uid']
+        return True
     kube.wait(f'{job} new execution',current_job)
     follower = subprocess.Popen(['kubectl','--context',settings.context,'-n',settings.namespace,
         'logs',f'job/{job}','--all-containers=true','--follow',
         f'--pod-running-timeout={settings.timeout}s'])
     try:
-        kube.wait(job,lambda:kube.job_complete(job))
+        kube.wait(job,lambda:kube.job_complete(job,uid=execution_uid))
     finally:
         try:
             follower.wait(timeout=5)
@@ -350,7 +362,7 @@ def operation_lock(settings):
 
 
 def clear_scenario(settings,skip_dependencies=False):
-    # Only known demo assets move to a backup; custom files and cluster state stay in place.
+    # Demo removal preserves custom files and running cluster resources.
     assets=['services/python-backend','services/python-worker','services/report-worker',
             'services/ruby-gateway','tests/e2e-tests','mocks/external-api-mock','seeds/vault-seeder']
     if not skip_dependencies:

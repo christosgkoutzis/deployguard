@@ -24,7 +24,7 @@ Job names include a hash of generated configuration, files, the image reference,
 
 ## 2. Service Initialization (Application Data)
 
-Keep migrations and application seed scripts in the service build context so they are included in its image. Declare an `init_command` or `INIT_COMMAND` env entry:
+Keep migrations and application seed scripts in the web service or worker build context so they are included in its image. Declare an `init_command` or `INIT_COMMAND` env entry. Test programs handle preparation themselves instead of using initialization hooks.
 
 ```yaml
 services:

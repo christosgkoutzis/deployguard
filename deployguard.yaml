@@ -2,7 +2,7 @@ apiVersion: deployguard/v1
 name: deployguard
 
 dependencies:
-  # 1. HASHICORP VAULT (Dev Mode)
+  # Vault: local development secrets.
   - name: vault
     repo: https://helm.releases.hashicorp.com
     chart: vault
@@ -27,7 +27,7 @@ dependencies:
           - name: bootstrap
             mountPath: /vault/userconfig/bootstrap
             readOnly: true
-  # 2. SEAWEEDFS (Local S3 Object Storage)
+  # SeaweedFS: local S3-compatible storage.
   - name: seaweedfs
     repo: https://seaweedfs.github.io/seaweedfs/helm
     chart: seaweedfs
@@ -59,13 +59,13 @@ dependencies:
         resources:
           requests: {memory: 256Mi, cpu: 100m}
           limits: {memory: 1Gi, cpu: "1"}
-  # 3. RABBITMQ (Native Local Chart)
+  # RabbitMQ: report task queue.
   - name: rabbitmq
     path: platform/dependencies/rabbitmq-instance-chart
     set:
       - "auth.existingSecret=platform-bootstrap-secrets"
       - "auth.passwordKey=RABBITMQ_PASSWORD"
-  # 4. POSTGRES (Bitnami - TCP Data Service)
+  # PostgreSQL: application data.
   - name: postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
@@ -77,14 +77,14 @@ dependencies:
       - "primary.persistence.size=100Mi"
       - "fullnameOverride=postgres"
 
-  # 5. KAFKA (Local DeployGuard KRaft Chart)
+  # Kafka: greeting events.
   - name: kafka
     path: platform/dependencies/confluent-kafka-chart
     set:
       - "image.tag=8.0.6"
       - "heapOpts=-Xms256m -Xmx256m"
 
-  # 6. REDIS (Bitnami - TCP Data Service)
+  # Redis: greeting cache.
   - name: redis
     repo: https://charts.bitnami.com/bitnami
     chart: redis
@@ -97,7 +97,7 @@ dependencies:
       - "master.persistence.size=100Mi"
       - "master.resources.limits.memory=128Mi"
 
-  # 7. ELASTICSEARCH (DeployGuard Universal Chart - HTTP Data Service)
+  # Elasticsearch: greeting search.
   - name: elasticsearch
     path: platform/charts/webservice
     set:
@@ -117,7 +117,7 @@ dependencies:
       - "env.ES_SETTING_NODE_STORE_ALLOW__MMAP=false"
       - "env.ES_JAVA_OPTS=-Xms512m -Xmx512m"
 
-# 8. KAFBAT UI (Active Community Fork of Provectus Kafka UI)
+  # Kafbat UI: Kafka inspection.
   - name: kafbat-ui
     depends_on: [kafka]
     repo: https://kafbat.github.io/helm-charts
@@ -134,7 +134,7 @@ dependencies:
       - "ingress.ingressClassName=traefik"
       - "ingress.host=kafka-ui.${CLUSTER_DOMAIN}"
 
-  # 9. DOZZLE (Lightweight K8s Log Viewer - Community Chart)
+  # Dozzle: pod log viewer.
   - name: dozzle
     repo: https://abnerrizzi.github.io/charts/
     chart: dozzle
@@ -171,7 +171,7 @@ services:
       store: vault-backend
       path: deployguard/python-backend
     env:
-     # 1. Platform Seed (Vault) -> 2. App Migration (Tables) -> 3. App Seed (Dummy Data)
+      # Backend initialization creates tables and sample data after Vault is seeded.
       - INIT_COMMAND=python migrate.py && python seed_db.py
       - ES_HOST=http://elasticsearch-service:9200
       - VAULT_URL=http://vault:8200

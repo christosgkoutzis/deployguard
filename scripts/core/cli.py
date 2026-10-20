@@ -123,17 +123,79 @@ def wait_environment(kube, topology, inventory, selected=None, *, refresh=False)
         try:
             kube.wait(name,ready)
         except ConfigError:
-            credentials = [topology.settings.environment[variable]
-                           for secret in topology.data.get('secrets', [])
-                           for variable in secret['values'].values()]
-            try:
-                kube.application_diagnostics(name, entry['source']['targetRevision'], credentials=credentials)
-            except (ConfigError, OSError, ValueError):
-                print(f'WARNING: Could not collect reconciliation details for {name}', file=sys.stderr)
+            report_application_failure(kube, topology, name, entry['source']['targetRevision'])
             raise
     # The parent must apply this revision; unrelated child health cannot gate focus or retries.
     kube.wait('parent configuration',lambda:kube.application_ready(
         f'{topology.name}-environment',inventory['revision'],health=False))
+
+
+def report_application_failure(kube, topology, name, revision):
+    credentials = [topology.settings.environment[variable]
+                   for secret in topology.data.get('secrets', [])
+                   for variable in secret['values'].values()]
+    try:
+        kube.application_diagnostics(name, revision, credentials=credentials)
+    except (ConfigError, OSError, ValueError):
+        print(f'WARNING: Could not collect reconciliation details for {name}', file=sys.stderr)
+
+
+def wait_initialization(kube, name, revision):
+    def available():
+        obj = kube.get('application', name, kube.settings.argo_namespace)
+        pending = obj.get('operation')
+        return (obj.get('spec', {}).get('source', {}).get('targetRevision') == revision and
+                (not pending or pending.get('sync', {}).get('revision') == revision))
+    kube.wait(f'{name} initialization scheduling', available)
+    obj = kube.get('application', name, kube.settings.argo_namespace)
+    operation = obj.get('status', {}).get('operationState', {})
+    if operation.get('syncResult', {}).get('revision') != revision and not obj.get('operation'):
+        kube.command('-n', kube.settings.argo_namespace, 'patch', 'application', name,
+                     '--type', 'json', '-p', json.dumps([{'op':'add', 'path':'/operation',
+                         'value':{'sync':{'revision':revision, 'prune':True,
+                                          'syncStrategy':{'hook':{}}}}}]), capture=True)
+    def initialized():
+        current = kube.get('application', name, kube.settings.argo_namespace)
+        operation = current.get('status', {}).get('operationState', {})
+        if operation.get('syncResult', {}).get('revision') != revision:
+            return False
+        if operation.get('phase') in ['Failed', 'Error']:
+            raise ConfigError(f'Initialization failed for {name}')
+        return operation.get('phase') == 'Succeeded' and not current.get('operation')
+    kube.wait(f'{name} initialization', initialized)
+
+
+def apply_environment(kube, root):
+    name = root['metadata']['name']
+    revision = root['spec']['source']['targetRevision']
+    kube.apply([root])
+    def obsolete_operation():
+        obj = kube.get('application', name, kube.settings.argo_namespace)
+        state = obj.get('status', {}).get('operationState', {})
+        active_revision = state.get('syncResult', {}).get('revision')
+        if (obj.get('operation') and active_revision and active_revision != revision and
+                state.get('phase') in ['Running', 'Terminating']):
+            return state
+        return None
+    state = obsolete_operation()
+    if not state:
+        return
+    print(f'INFO: Waiting for superseded parent synchronization to stop: {name}', flush=True)
+    if state['phase'] == 'Running':
+        patch = [
+            {'op':'test', 'path':'/status/operationState/syncResult/revision',
+             'value':state['syncResult']['revision']},
+            {'op':'test', 'path':'/status/operationState/phase', 'value':'Running'},
+            {'op':'replace', 'path':'/status/operationState/phase', 'value':'Terminating'},
+        ]
+        try:
+            kube.command('-n', kube.settings.argo_namespace, 'patch', 'application', name,
+                         '--type', 'json', '-p', json.dumps(patch), capture=True)
+        except ConfigError:
+            current = obsolete_operation()
+            if current and current['phase'] == 'Running':
+                raise
+    kube.wait('superseded parent sync termination', lambda: not obsolete_operation())
 
 
 def sync(topology, focus=None, prune=False):
@@ -178,9 +240,7 @@ def sync(topology, focus=None, prune=False):
     print('INFO: Starting local Git source', flush=True)
     source_server(settings,topology.name)
     print('INFO: Applying environment Application', flush=True)
-    kube.apply([root])
-    kube.command('-n',settings.argo_namespace,'patch','application',f'{topology.name}-environment',
-                 '--type','merge','-p',json.dumps({'operation':{'sync':{'prune':True}}}),capture=True)
+    apply_environment(kube, root)
     wait_environment(kube,topology,inventory,refresh=True)
     if prune:
         for name in previous_applications - set(selected):
@@ -191,18 +251,11 @@ def sync(topology, focus=None, prune=False):
         item = topology.entities[name][1]
         if topology.entities[name][0] == 'services' and (item.get('init_command') or topology.environment(item).get('INIT_COMMAND')):
             entry = inventory['applications'][name]
-            obj = kube.get('application',name,settings.argo_namespace)
-            if obj.get('status',{}).get('operationState',{}).get('syncResult',{}).get('revision') != entry['source']['targetRevision']:
-                kube.command('-n',settings.argo_namespace,'patch','application',name,'--type','merge',
-                    '-p',json.dumps({'operation':{'sync':{'prune':True}}}),capture=True)
-                def initialized(n=name,r=entry['source']['targetRevision']):
-                    operation=kube.get('application',n,settings.argo_namespace).get('status',{}).get('operationState',{})
-                    if operation.get('syncResult',{}).get('revision') != r:
-                        return False
-                    if operation.get('phase') in ['Failed','Error']:
-                        raise ConfigError(f'Initialization failed for {n}')
-                    return operation.get('phase')=='Succeeded'
-                kube.wait(f'{name} initialization',initialized)
+            try:
+                wait_initialization(kube, name, entry['source']['targetRevision'])
+            except ConfigError:
+                report_application_failure(kube, topology, name, entry['source']['targetRevision'])
+                raise
     verify(topology,inventory)
     print('INFO: Environment synced and verified')
 
@@ -253,7 +306,7 @@ def test(topology, name):
     snapshot = Snapshot(topology)
     run_id = uuid.uuid4().hex
     root,inventory = snapshot.run_test(name,run_id)
-    kube.apply([root])
+    apply_environment(kube, root)
     def current_job():
         raw = kube.command('-n',settings.namespace,'get','job',job,
                            '--ignore-not-found','-o','json',capture=True)

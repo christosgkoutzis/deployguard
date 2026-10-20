@@ -35,7 +35,7 @@ services:
 
 Initialization uses an ArgoCD `Sync` hook in wave 1, after any ExternalSecret in wave 0 and before the Deployment in wave 2. It uses the service image, environment, Secret references, and resources. Commands run through `/bin/sh -c` in the image's working directory.
 
-Hooks run on each deployment sync for the selected service. Successful hooks are removed; failed hooks fail the sync and remain available for diagnostics. Images using initialization commands need a shell. Commands must be safe to repeat; applications should coordinate concurrent migrations when needed.
+Hooks run on each deployment sync for the selected service. Initialization waits for the recorded deployment revision and reports a failed ArgoCD operation as a deployment failure. ArgoCD retries automatic synchronizations up to three times; DeployGuard waits for the result within `TIMEOUT_SECONDS`. Successful hooks are removed; failed hooks remain until a subsequent attempt replaces them, including an automatic retry. Images using initialization commands need a shell. Commands must be safe to repeat; applications should coordinate concurrent migrations when needed.
 
 ## Execution and Failures
 

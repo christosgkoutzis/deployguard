@@ -46,15 +46,40 @@ def check_code():
     Draft202012Validator.check_schema(json.loads((ROOT/'platform/config/topology.schema.json').read_text()))
     print(f'SUCCESS: {count} files passed read-only syntax/schema checks')
 
-def cli(*args,expected=0,timeout=None,environment=None):
+def cli(*args,expected=0,timeout=None,environment=None,observe=None):
     environment={**os.environ,**(environment or {})}
     if timeout:
         environment['TIMEOUT_SECONDS']=str(timeout)
-    result=subprocess.run([str(ROOT/'scripts/deployguard'),*args],cwd=ROOT,env=environment)
+    arguments=[str(ROOT/'scripts/deployguard'),*args]
+    if observe is None:
+        result=subprocess.run(arguments,cwd=ROOT,env=environment)
+    else:
+        with tempfile.TemporaryFile(mode='w+',dir=ROOT/'.local/tmp') as output:
+            process=subprocess.Popen(arguments,cwd=ROOT,env=environment,stdout=output,stderr=subprocess.STDOUT)
+            try:
+                while process.poll() is None:
+                    observe()
+                    try:
+                        process.wait(timeout=0.5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                observe()
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                output.seek(0)
+                result=subprocess.CompletedProcess(arguments,process.returncode,stdout=output.read())
+                print(result.stdout,end='',flush=True)
     if expected==0:
         assert result.returncode==0, 'Expected command success'
     else:
         assert result.returncode!=0, 'A negative assessment unexpectedly passed'
+    return result
 
 def inventory():
     return json.loads((ROOT/'.local/state/inventory.json').read_text())
@@ -98,7 +123,7 @@ def generic():
 
 def _generic(base):
     def command(*args, environment=None, **kwargs):
-        cli(*args, environment={'TOPOLOGY_FILE':str(base/'topology.yaml'),
+        return cli(*args, environment={'TOPOLOGY_FILE':str(base/'topology.yaml'),
                                **(environment or {})}, **kwargs)
 
     settings=Settings.load(base/'topology.yaml')
@@ -158,9 +183,21 @@ def _generic(base):
         command('sync','--topology',str(failure),'--focus','fixture-worker',expected=1,timeout=90)
         kube.wait('unrelated worker unhealthy',lambda:kube.get('application','fixture-worker',settings.argo_namespace)
                   .get('status',{}).get('health',{}).get('status')!='Healthy')
+        retained_source=inventory()['applications']['fixture-worker']['source']
+        retained_template=kube.get('deployment','fixture-worker-workload')['spec']['template']
         command('sync','--focus','fixture-api')
         command('verify')
-        assert kube.get('application','fixture-worker',settings.argo_namespace)
+        worker=kube.get('application','fixture-worker',settings.argo_namespace)
+        assert inventory()['applications']['fixture-worker']['source']==retained_source, 'Focus changed the retained worker inventory'
+        assert worker, 'Focus removed the retained worker Application'
+        worker_source=worker['spec']['source']
+        # ArgoCD's JSON serialization omits an empty Helm parameter list.
+        worker_source.setdefault('helm',{}).setdefault('parameters',[])
+        assert worker_source==retained_source, 'Focus changed retained worker source fields: '+', '.join(
+            sorted(key for key in worker_source.keys() | retained_source.keys()
+                   if worker_source.get(key)!=retained_source.get(key)))
+        assert kube.get('deployment','fixture-worker-workload')['spec']['template']==retained_template, 'Focus changed the retained worker workload'
+        assert worker.get('status',{}).get('health',{}).get('status') in ['Progressing','Degraded'], 'Retained worker health was masked'
     finally:
         failure.unlink()
     command('sync')
@@ -210,11 +247,25 @@ def _generic(base):
     failure=base/'failure.yaml'
     data['services'][0]['init_command']='exit 37'
     failure.write_text(yaml.safe_dump(data))
-    command('sync','--topology',str(failure),'--focus','fixture-api',expected=1,timeout=90)
-    init_pods = json.loads(kube.command('-n',settings.namespace,'get','pods','-l',
-        'app=fixture-api-init','-o','json',capture=True))['items']
-    assert any(state.get('state',{}).get('terminated',{}).get('exitCode') == 37
-        for pod in init_pods for state in pod.get('status',{}).get('containerStatuses',[])), 'Expected initialization failure was not observed'
+    def init_pods():
+        return json.loads(kube.command('-n',settings.namespace,'get','pods','-l',
+                          'app=fixture-api-init','-o','json',capture=True))['items']
+    previous_pods={pod['metadata']['uid'] for pod in init_pods()}
+    exit_codes=set()
+    def observe_initialization():
+        for pod in init_pods():
+            if pod['metadata']['uid'] in previous_pods:
+                continue
+            for container in pod.get('status',{}).get('containerStatuses',[]):
+                terminated=container.get('state',{}).get('terminated')
+                if terminated:
+                    exit_codes.add(terminated['exitCode'])
+    result=command('sync','--topology',str(failure),'--focus','fixture-api',expected=1,
+                   observe=observe_initialization)
+    assert 37 in exit_codes, 'Expected initialization exit code 37 was not observed'
+    assert any(message in result.stdout for message in [
+        'ERROR: Initialization failed for fixture-api',
+        'ERROR: ArgoCD sync failed for fixture-api']), 'Initialization failure was not reported'
     command('sync')
     data=yaml.safe_load((base/'topology.yaml').read_text())
     data['dependencies']=[{'name':'missing-chart','repo':'https://example.invalid',

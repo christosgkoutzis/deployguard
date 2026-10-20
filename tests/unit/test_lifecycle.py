@@ -3,11 +3,13 @@ from copy import deepcopy
 from contextlib import nullcontext
 from http.client import RemoteDisconnected
 import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 
-from core.cli import failure_message, main, source_server, wait_environment
+from core.assessment import cli as assessment_cli
+from core.cli import apply_environment, failure_message, main, source_server, wait_environment, wait_initialization
 from core.configuration import ConfigError
 from core.kubernetes import Kubernetes, SECRET_REVISION, secret_references
 
@@ -151,6 +153,165 @@ def test_verification_ignores_parent_and_test_health_but_checks_selected_service
     calls.clear()
     wait_environment(Fake(),SimpleNamespace(name='fixture'),inventory,['api'])
     assert calls == [('api',True),('fixture-environment',False)]
+
+
+@pytest.mark.parametrize('phase,active_revision',[
+    (None,None),('Succeeded','old'),('Running','new'),('Running','old'),('Terminating','old'),
+])
+def test_parent_reconciliation_supersedes_only_an_obsolete_running_operation(phase,active_revision):
+    root={'metadata':{'name':'fixture-environment'},'spec':{'source':{'targetRevision':'new'}}}
+    app={'spec':{'source':{'targetRevision':'old'}},'status':{}}
+    if phase:
+        app['status']['operationState']={'phase':phase,'syncResult':{'revision':active_revision}}
+        if phase in ['Running','Terminating']:
+            app['operation']={'sync':{'revision':active_revision}}
+    patches=[]
+    waits=[]
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd')
+        def apply(self,objects):
+            assert objects==[root]
+            assert 'operation' not in objects[0]
+            app['spec']=deepcopy(root['spec'])
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            assert args[args.index('--type')+1]=='json'
+            patch=json.loads(args[args.index('-p')+1])
+            state=app['status']['operationState']
+            assert patch[0]=={'op':'test','path':'/status/operationState/syncResult/revision','value':'old'}
+            assert patch[1]=={'op':'test','path':'/status/operationState/phase','value':'Running'}
+            assert patch[2]=={'op':'replace','path':'/status/operationState/phase','value':'Terminating'}
+            patches.append(patch)
+            state['phase']='Terminating'
+        def wait(self,label,predicate):
+            waits.append(label)
+            assert predicate() is False
+            app['status']['operationState']={'phase':'Running','syncResult':{'revision':'new'}}
+            app['operation']={'sync':{'revision':'new'}}
+            assert predicate() is True
+    apply_environment(Fake(),root)
+    assert len(patches)==int(phase=='Running' and active_revision=='old')
+    assert len(waits)==int(phase in ['Running','Terminating'] and active_revision=='old')
+    assert app['spec']==root['spec']
+
+
+@pytest.mark.parametrize('advances',[False,True])
+def test_parent_termination_preserves_a_concurrently_started_operation_and_reports_real_errors(advances):
+    root={'metadata':{'name':'fixture-environment'},'spec':{'source':{'targetRevision':'new'}}}
+    app={'operation':{'sync':{'revision':'old'}},'status':{
+        'operationState':{'phase':'Running','syncResult':{'revision':'old'}}}}
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd')
+        def apply(self,objects):
+            pass
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            if advances:
+                app['status']['operationState']['syncResult']['revision']='new'
+                app['operation']['sync']['revision']='new'
+            raise ConfigError('Patch rejected')
+        def wait(self,label,predicate):
+            assert predicate() is True
+    if advances:
+        apply_environment(Fake(),root)
+        assert app['status']['operationState']['phase']=='Running'
+    else:
+        with pytest.raises(ConfigError,match='Patch rejected'):
+            apply_environment(Fake(),root)
+
+
+def test_initialization_waits_for_prior_operation_and_requests_the_exact_revision():
+    app={'spec':{'source':{'targetRevision':'requested'}},
+         'operation':{'sync':{'revision':'previous'}},
+         'status':{'operationState':{'phase':'Succeeded','syncResult':{'revision':'previous'}}}}
+    requests=[]
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd')
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            assert args[args.index('--type')+1]=='json'
+            patch=json.loads(args[args.index('-p')+1])
+            requests.append(patch)
+            app['operation']=patch[0]['value']
+        def wait(self,label,predicate):
+            if label.endswith('scheduling'):
+                assert predicate() is False
+                app.pop('operation')
+                assert predicate() is True
+            else:
+                assert predicate() is False
+                app['status']['operationState']={'phase':'Running','syncResult':{'revision':'requested'}}
+                assert predicate() is False
+                app['status']['operationState']['phase']='Succeeded'
+                assert predicate() is False
+                app.pop('operation')
+                assert predicate() is True
+    wait_initialization(Fake(),'api','requested')
+    assert requests==[[{'op':'add','path':'/operation','value':{'sync':{
+        'revision':'requested','prune':True,'syncStrategy':{'hook':{}}}}}]]
+
+
+@pytest.mark.parametrize('phase',['Succeeded','Failed','Error'])
+def test_initialization_checks_terminal_status_even_when_the_revision_already_matches(phase):
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd')
+        def get(self,*args,**kwargs):
+            return {'spec':{'source':{'targetRevision':'requested'}},
+                    'status':{'operationState':{'phase':phase,'syncResult':{'revision':'requested'}}}}
+        def command(self,*args,**kwargs):
+            pytest.fail('An existing operation was restarted')
+        def wait(self,label,predicate):
+            assert predicate() is True
+    if phase=='Succeeded':
+        wait_initialization(Fake(),'api','requested')
+    else:
+        with pytest.raises(ConfigError,match='Initialization failed for api'):
+            wait_initialization(Fake(),'api','requested')
+
+
+@pytest.mark.parametrize('observation_fails',[False,True])
+def test_assessment_observes_short_lived_failure_evidence_and_preserves_command_output(
+        monkeypatch,tmp_path,capsys,observation_fails):
+    (tmp_path/'.local/tmp').mkdir(parents=True)
+    monkeypatch.setattr('core.assessment.ROOT',tmp_path)
+    exits=[]
+    evidence=set()
+    class Process:
+        returncode=None
+        waits=0
+        def __init__(self,arguments,**kwargs):
+            assert kwargs['stderr']==subprocess.STDOUT
+            kwargs['stdout'].write('ERROR: Initialization failed for api\n')
+            exits.append(37)
+        def poll(self):
+            return self.returncode
+        def wait(self,timeout):
+            self.waits+=1
+            exits.clear()
+            if self.waits==1 and self.returncode is None:
+                raise subprocess.TimeoutExpired('sync',timeout)
+            if self.returncode is None:
+                self.returncode=1
+            return self.returncode
+        def terminate(self):
+            self.returncode=-15
+    monkeypatch.setattr('core.assessment.subprocess.Popen',Process)
+    def observe():
+        evidence.update(exits)
+        if observation_fails:
+            raise ValueError('Observation unavailable')
+    if observation_fails:
+        with pytest.raises(ValueError,match='Observation unavailable'):
+            assessment_cli('sync',expected=1,observe=observe)
+    else:
+        result=assessment_cli('sync',expected=1,observe=observe)
+        assert result.returncode==1
+        assert result.stdout=='ERROR: Initialization failed for api\n'
+    assert evidence=={37}
+    assert 'ERROR: Initialization failed for api' in capsys.readouterr().out
 
 
 def test_secret_references_include_env_files_and_projected_volumes():

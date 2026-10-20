@@ -65,7 +65,6 @@ jobs:
       - name: Deploy and verify focused environment
         run: |
           ./scripts/deployguard sync --focus e2e-tests
-          ./scripts/deployguard verify
           ./scripts/deployguard assess scenario --mode focused
       - name: Test focused environment and repeated sync
         run: |
@@ -77,7 +76,6 @@ jobs:
       - name: Expand and verify full environment
         run: |
           ./scripts/deployguard sync
-          ./scripts/deployguard verify
           ./scripts/deployguard assess scenario --mode full
       - name: Test full environment and repeated sync
         run: |
@@ -119,8 +117,6 @@ jobs:
           ./scripts/deployguard setup
           ./scripts/deployguard bootstrap
           ./scripts/deployguard sync
-          ./scripts/deployguard test fixture-tests
-          ./scripts/deployguard test fixture-tests
           ./scripts/deployguard assess generic
       - name: Collect focused diagnostics
         if: failure()

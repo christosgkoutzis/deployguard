@@ -14,6 +14,9 @@ configs:
     server.insecure: true
   cm:
     resource.customizations.health.argoproj.io_Application: |
+      if obj.metadata.annotations and obj.metadata.annotations["argocd.argoproj.io/ignore-healthcheck"] == "true" then
+        return {status = "Healthy", message = "Application outside current deployment selection"}
+      end
       local hs = {status = "Progressing", message = "Waiting for child Application"}
       if obj.status and obj.status.health and obj.status.sync and obj.spec.source then
         if obj.status.sync.status ~= "Synced" or obj.status.sync.revision ~= obj.spec.source.targetRevision then

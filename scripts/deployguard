@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# One public entry point; Python implements installation and application commands.
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PATH="$REPO_ROOT/.local/venv/bin:$REPO_ROOT/.local/bin:$PATH"
+export TMPDIR="$REPO_ROOT/.local/tmp"
+export PIP_CACHE_DIR="$REPO_ROOT/.local/cache/pip"
+export PYTHONPYCACHEPREFIX="$REPO_ROOT/.local/cache/python"
+
+if [[ "${1:-}" == install ]]; then
+  shift
+  PYTHON="${DEPLOYGUARD_PYTHON:-}"
+  if [[ -z "$PYTHON" ]]; then
+    for candidate in python3.11 python3; do
+      if command -v "$candidate" >/dev/null 2>&1 &&
+         "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+        PYTHON="$candidate"
+        break
+      fi
+    done
+  fi
+  if [[ -z "$PYTHON" ]] || ! command -v "$PYTHON" >/dev/null 2>&1 ||
+     ! "$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+    echo "ERROR: Python 3.11 or newer is required. Set DEPLOYGUARD_PYTHON to its executable if needed." >&2
+    exit 1
+  fi
+  exec "$PYTHON" "$REPO_ROOT/scripts/core/installation.py" "$@"
+fi
+
+if [[ $# -eq 0 ]]; then
+  echo "Usage: ./scripts/deployguard install [--assessment]"
+  echo "       ./scripts/deployguard <command> [arguments]"
+  echo "Run ./scripts/deployguard --help after installation to list application commands."
+  exit 0
+fi
+
+if [[ ! -x "$REPO_ROOT/.local/venv/bin/deployguard" ]]; then
+  echo "ERROR: This checkout is not installed. Run ./scripts/deployguard install first." >&2
+  exit 1
+fi
+exec "$REPO_ROOT/.local/venv/bin/deployguard" "$@"

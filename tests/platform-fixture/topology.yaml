@@ -1,0 +1,41 @@
+apiVersion: deployguard/v1
+name: fixture
+secrets:
+  - name: fixture-bootstrap
+    values:
+      password: FIXTURE_PASSWORD
+seeds:
+  - name: prepare
+    image: python:3.11-slim
+    files: seeds
+    command: [python, /seeds/prepare.py]
+mocks:
+  - fixture-mock
+services:
+  - name: fixture-api
+    build_path: code/http-app
+    port: 8123
+    health_endpoint: /ready
+    env_file: fixture.env
+    env:
+      - MESSAGE=inline override
+      - INIT_COMMAND=python initialize.py
+    secret_env:
+      PASSWORD: {name: fixture-bootstrap, key: password}
+    depends_on: [prepare, fixture-mock]
+  - name: fixture-worker
+    type: worker
+    build_path: code/worker
+    depends_on: [fixture-api]
+  - name: fixture-tests
+    type: test
+    build_path: code/checks
+    depends_on: [fixture-api, fixture-worker, fixture-mock]
+    resources:
+      limits:
+        memory: 128Mi
+
+  - name: fixture-other-tests
+    type: test
+    build_path: code/checks
+    depends_on: [fixture-api, fixture-worker, fixture-mock]

@@ -1,6 +1,5 @@
 import os
 import time
-import json
 import boto3
 import csv
 import pika
@@ -19,7 +18,7 @@ try:
 except Exception:
     pass
 
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://seaweedfs-all-in-one:8333")
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 RABBITMQ_USER = os.getenv("RABBITMQ_USER", "admin")
 RABBITMQ_PASS = os.getenv("RABBITMQ_PASSWORD")
@@ -35,15 +34,15 @@ class Greeting(Base):
     status = Column(String)
     created_at = Column(DateTime)
 
-# MinIO client with strict PATH-STYLE addressing to avoid K8s DNS failures
-s3_config = Config(s3={'addressing_style': 'path'})
+# Path-style S3 requests use the cluster Service hostname for every bucket.
+s3_config = Config(signature_version='s3v4', s3={'addressing_style': 'path'})
 s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, region_name=os.getenv('AWS_DEFAULT_REGION', 'us-east-1'), config=s3_config)
 
 def ensure_s3_bucket():
     try:
         s3.create_bucket(Bucket='reports-bucket')
     except Exception as e:
-        print(f"WARN: Bucket might already exist or MinIO not ready: {e}")
+        print(f"WARN: Bucket might already exist or S3 object storage not ready: {e}")
 
 def process_report():
     db = SessionLocal()
@@ -58,11 +57,11 @@ def process_report():
             writer.writerow([g.id, g.greeting, g.status, g.created_at])
     
     s3.upload_file(filepath, 'reports-bucket', 'greetings_report.csv')
-    print("INFO: CSV Report uploaded to MinIO successfully.")
+    print("INFO: CSV Report uploaded to S3 object storage successfully.")
 
 def run_worker():
     print("INFO: Report Worker starting...")
-    time.sleep(15) # Give MinIO time to initialize
+    time.sleep(15)
     ensure_s3_bucket()
 
     credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
@@ -86,7 +85,6 @@ def run_worker():
             print("INFO: Task completed and ACK sent.")
         except Exception as e:
             print(f"ERROR: Failed to process report: {e}")
-            # Requeue on failure
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
     channel.basic_qos(prefetch_count=1)

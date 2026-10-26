@@ -1,4 +1,18 @@
-# Generated service deployment artifacts (created by scripts/add-service.sh)
-platform/charts/*
-platform/gitops/*.yaml
+# Local credentials and all generated tooling/runtime content
 .env
+.local/
+
+# Additional local environments and caches
+.venv/
+.tools/
+.deployguard/
+.pytest_cache/
+.sync-env.env
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Native Helm subcharts vendored locally
+platform/charts/*/charts/
+platform/dependencies/*/charts/

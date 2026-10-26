@@ -1,5 +1,4 @@
 import os
-import time
 import requests
 import datetime
 from fastapi import FastAPI, Request, BackgroundTasks
@@ -15,8 +14,8 @@ import boto3
 import pika
 from botocore.config import Config
 
-# Vault Graceful Fallback Helper
 def get_secret(path, key, default_env_val=None):
+    """Read Vault with the supplied environment value as a fallback."""
     try:
         client = hvac.Client(url=os.getenv("VAULT_URL", "http://vault:8200"), token=os.getenv("VAULT_ROOT_TOKEN"))
         if client.is_authenticated():
@@ -79,7 +78,7 @@ def get_mock_greeting():
 @app.get("/db/read")
 def read_db():
     try:
-        # 1. Check cache first!
+        # Reads use Redis first; database results are cached for 15 seconds.
         try:
             cached = cache.get("latest_greeting")
             if cached:
@@ -89,7 +88,6 @@ def read_db():
         except Exception as e:
             print(f"WARN: Redis Error: {e}")
 
-        # 2. If not in cache, read from DB
         db = SessionLocal()
         latest = db.query(Greeting).order_by(Greeting.id.desc()).first()
         db.close()
@@ -101,7 +99,6 @@ def read_db():
                 "created_at": latest.created_at.strftime("%Y-%m-%d %H:%M:%S") if latest.created_at else None
             }
             
-            # 3. Store the result in Redis for 15 seconds
             try:
                 cache.setex("latest_greeting", 15, json.dumps(response_data))
             except Exception:
@@ -114,13 +111,13 @@ def read_db():
     except Exception as e:
         return {"error": str(e)}
 
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
-# Strict config to prevent virtual-hosted K8s DNS failures with MinIO
-s3_config = Config(s3={'addressing_style': 'path'})
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://seaweedfs-all-in-one:8333")
+# Path-style S3 requests use the cluster Service hostname for every bucket.
+s3_config = Config(signature_version='s3v4', s3={'addressing_style': 'path'})
 s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, region_name=os.getenv('AWS_DEFAULT_REGION', 'us-east-1'), config=s3_config)
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
-RABBITMQ_USER = os.getenv("AWS_ACCESS_KEY_ID", "admin")
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "admin")
 RABBITMQ_PASS = os.environ["RABBITMQ_PASSWORD"]
 
 @app.post("/db/write")
@@ -147,7 +144,7 @@ async def write_db(request: Request):
         return {"error": str(e)}
 
 def trigger_rabbitmq_export():
-    """Runs in a separate thread so it doesn't block FastAPI's async loop"""
+    """Publish a durable CSV export task to RabbitMQ."""
     try:
         credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
         connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
@@ -175,7 +172,7 @@ def search(q: str):
 
 @app.post("/report/generate")
 async def generate_report(background_tasks: BackgroundTasks):
-    # Delegate the synchronous blocking call to a background thread
+    # Blocking RabbitMQ I/O runs in the background task pool.
     background_tasks.add_task(trigger_rabbitmq_export)
     return {"status": "Task queued successfully in background"}
 

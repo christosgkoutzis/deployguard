@@ -1,0 +1,9 @@
+apiVersion: v2
+name: seed
+version: 0.2.0
+type: application
+description: Declarative platform initialization Job
+dependencies:
+  - name: common-library
+    version: 0.2.0
+    repository: file://../common-library

@@ -1,6 +1,6 @@
 <h1 align="center">Welcome to DeployGuard 🛡️</h1>
 
-<h3 align="center">A declarative, GitOps-driven local Kubernetes environment for microservices! 🚀</h3>
+<h3 align="center">A local Kubernetes GitOps lab for microservice integration testing and platform experimentation.</h3>
 
 <p align="center">
     <img src="https://img.shields.io/badge/Kubernetes-326ce5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="kubernetes">
@@ -10,13 +10,19 @@
     <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="python">
 </p>
 
-## Inspiration
-
-Local development for complex, event-driven microservices is traditionally painful. Developers struggle with heavy docker-compose files, mismatched configurations, and manual dependency setups. DeployGuard brings familiar Kubernetes and platform engineering workflows to a developer's machine.
-
 ## Purpose
 
-DeployGuard is a standalone local development tool for building and running microservices, dependencies, mocks, seeds, and integration tests. A declarative `deployguard.yaml` describes the environment. DeployGuard combines k3d, Skaffold, Helm, and ArgoCD without depending on any company's repositories or platform.
+DeployGuard builds and runs local environments containing application services, dependencies, mocks, seeds, and integration tests. Use it to test interactions between services and explore Kubernetes deployment, GitOps reconciliation, initialization, and secrets management.
+
+A declarative `deployguard.yaml` describes the environment. DeployGuard combines k3d, Skaffold, Helm, and ArgoCD into a standalone workflow: build images, deploy a recorded configuration, check readiness, and explicitly run tests.
+
+## Scope
+
+Start with the bundled scenario or prepare your own compatible application images, dependency charts, configuration, and test data. DeployGuard coordinates these inputs; it does not discover an application's dependencies or configure its authentication and data automatically. Keep the topology and supporting files updated as your applications change.
+
+The built-in application charts support single-container web services, workers, and test Jobs. Other workload shapes need custom dependency charts. See [Services & Workers](docs/services.md) for build requirements and limits.
+
+Source changes require an explicit sync. File watching, live source synchronization, and debugger orchestration are outside this workflow. The lab targets local testing and experimentation rather than production operation.
 
 ## Features
 

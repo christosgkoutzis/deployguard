@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "deployguard"
 version = "0.2.0"
-description = "Standalone local Kubernetes development tool"
+description = "Local Kubernetes GitOps lab for microservice integration testing and platform experimentation"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.11"

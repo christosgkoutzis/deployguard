@@ -106,7 +106,7 @@ class Kubernetes:
             return value[:2000]
         def resource(value):
             result = {key:value[key] for key in ['group','kind','namespace','name','status',
-                                                'hookPhase','syncPhase','requiresPruning'] if key in value}
+                                                'hookType','hookPhase','syncPhase','requiresPruning'] if key in value}
             if value.get('health'):
                 result['health'] = value['health'].get('status')
             if value.get('message'):
@@ -115,6 +115,7 @@ class Kubernetes:
         status = obj.get('status', {})
         operation = status.get('operationState', {})
         sync_result = operation.get('syncResult', {})
+        sync_request = operation.get('operation', {}).get('sync', {})
         summary = {
             'name':name, 'requestedRevision':revision,
             'desiredRevision':obj.get('spec', {}).get('source', {}).get('targetRevision'),
@@ -127,6 +128,10 @@ class Kubernetes:
             'operation':{**{key:operation[key] for key in ['phase','startedAt','finishedAt'] if key in operation},
                          'message':message(operation.get('message', '')),
                          'revision':sync_result.get('revision'),
+                         'request':{'revision':sync_request.get('revision'),
+                                    'dryRun':bool(sync_request.get('dryRun')),
+                                    'strategy':'apply' if 'apply' in sync_request.get('syncStrategy', {}) else 'hook',
+                                    'resources':[resource(value) for value in sync_request.get('resources', [])]},
                          'resources':[resource(value) for value in sync_result.get('resources', [])]},
             'resources':[resource(value) for value in status.get('resources', [])],
         }

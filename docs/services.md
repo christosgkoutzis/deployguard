@@ -6,7 +6,7 @@ Declare application services and background workers under `services` in your top
 
 1. Application services default to `services/<name>/`; test services default to `tests/<name>/`.
 2. Custom build_path values point to local Docker contexts relative to the topology.
-3. Every context must contain a Dockerfile.
+3. Every context must contain a file named `Dockerfile`.
 4. Names must be unique lowercase DNS labels of at most 40 characters.
 
 ## Workload Archetypes
@@ -34,7 +34,7 @@ services:
     depends_on: [sample-api]
 ```
 
-Defaults are port 8000, health path /health, and one replica. The internal Service is `<name>-service` on port 80; other pods use `http://<name>-service:80`. Deployment names are `<name>-workload`.
+Web service defaults are port 8000, health path /health, and one replica. Their internal Service is `<name>-service` on port 80; other pods use `http://<name>-service:80`. Web service and worker Deployments are named `<name>-workload`. Workers have no Service or Ingress.
 
 ## Customizing Environment Variables
 
@@ -105,5 +105,7 @@ Kubernetes Secrets and Vault dev mode serve the disposable local environment. Se
 3. Web services without an HTTP health endpoint.
 4. Advanced ingress, mTLS, or network policy configuration through service fields.
 5. Direct remote Git onboarding; build input must be a local folder.
+6. Custom Dockerfile names, build arguments, or build secrets through topology fields. Runtime Secret references apply to deployed containers, not image builds.
+7. Prebuilt application images through service fields; services are built from their local contexts. Dependency charts can use their own image references.
 
 Use a custom dependency chart for Kubernetes shapes outside these archetypes.

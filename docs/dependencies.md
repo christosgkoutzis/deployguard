@@ -63,10 +63,10 @@ With the default configuration and full demo selected:
 
 Adjust the domain and port for your settings. Dozzle and Kafbat are ordinary demo dependencies, excluded from a fresh `--focus e2e-tests` deployment.
 
-Retrieve the ArgoCD initial password from the explicit context:
+From the repository root, retrieve the ArgoCD initial password using the installed kubectl:
 
 ```bash
-kubectl --context k3d-control-plane-cluster -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+.local/bin/kubectl --context k3d-control-plane-cluster -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 
-ArgoCD uses Helm to render application charts. Those applications are not installed as Helm releases; `helm list` shows bootstrap releases such as ArgoCD and ESO.
+ArgoCD uses Helm to render application charts. Helm release listings show bootstrap releases such as ArgoCD and ESO; application workloads are managed through ArgoCD Applications.

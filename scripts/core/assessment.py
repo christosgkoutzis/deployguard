@@ -299,12 +299,20 @@ def _generic(base):
                 terminated=container.get('state',{}).get('terminated')
                 if terminated:
                     exit_codes.add(terminated['exitCode'])
-    result=command('sync','--topology',str(failure),'--focus','fixture-api',expected=1,
-                   observe=observe_initialization)
-    assert 37 in exit_codes, 'Expected initialization exit code 37 was not observed'
-    assert any(message in result.stdout for message in [
-        'ERROR: Initialization failed for fixture-api',
-        'ERROR: ArgoCD sync failed for fixture-api']), 'Initialization failure was not reported'
+    try:
+        result=command('sync','--topology',str(failure),'--focus','fixture-api',expected=1,
+                       observe=observe_initialization)
+        assert 37 in exit_codes, 'Expected initialization exit code 37 was not observed'
+        assert any(message in result.stdout for message in [
+            'ERROR: Initialization failed for fixture-api',
+            'ERROR: ArgoCD sync failed for fixture-api']), 'Initialization failure was not reported'
+    except AssertionError:
+        try:
+            kube.application_diagnostics('fixture-api',inventory()['applications']['fixture-api']['source']['targetRevision'],
+                                         credentials=[settings.environment['FIXTURE_PASSWORD']])
+        except (ConfigError,OSError,ValueError):
+            print('WARNING: Could not collect initialization assessment diagnostics')
+        raise
     command('sync')
     data=yaml.safe_load((base/'topology.yaml').read_text())
     data['dependencies']=[{'name':'missing-chart','repo':'https://example.invalid',

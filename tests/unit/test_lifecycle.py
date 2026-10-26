@@ -184,9 +184,15 @@ def test_application_diagnostics_include_reconciliation_state_and_redact_credent
                      'health':{'status':'Healthy'},
                      'conditions':[{'type':'SyncError','message':'Rejected '+credential}],
                      'operationState':{'phase':'Running','message':'Waiting '+credential,
+                                       'operation':{'info':[{'name':'private','value':'not-for-logs'}],
+                                                    'sync':{'revision':'operation-revision','dryRun':True,
+                                                            'syncStrategy':{'apply':{}},'resources':[
+                                                                {'kind':'Deployment','name':'api','private':'not-for-logs'}]}},
                                        'syncResult':{'revision':'operation-revision','resources':[
                                            {'kind':'Deployment','name':'api','status':'SyncFailed',
-                                            'message':'Invalid '+json.dumps(credential),'liveState':'not-for-logs'}]}},
+                                            'message':'Invalid '+json.dumps(credential),'liveState':'not-for-logs'},
+                                           {'group':'batch','kind':'Job','name':'api-init',
+                                            'hookType':'Sync','hookPhase':'Failed'}]}},
                      'resources':[{'kind':'Deployment','name':'api','status':'OutOfSync',
                                    'health':{'status':'Healthy'}}]}}
     monkeypatch.setattr(kube, 'get', lambda *args, **kwargs: app)
@@ -199,8 +205,12 @@ def test_application_diagnostics_include_reconciliation_state_and_redact_credent
     assert summary['pendingOperation'] is True
     assert summary['operation']['phase'] == 'Running'
     assert summary['operation']['revision'] == 'operation-revision'
+    assert summary['operation']['request'] == {'revision':'operation-revision','dryRun':True,
+                                              'strategy':'apply','resources':[{'kind':'Deployment','name':'api'}]}
     assert summary['resources'][0]['status'] == 'OutOfSync'
     assert summary['operation']['resources'][0]['status'] == 'SyncFailed'
+    assert summary['operation']['resources'][1]['hookType'] == 'Sync'
+    assert summary['operation']['resources'][1]['hookPhase'] == 'Failed'
     assert credential not in output and json.dumps(credential)[1:-1] not in output
     assert 'not-for-logs' not in output
     assert '[REDACTED]' in summary['conditions'][0]['message']
@@ -352,24 +362,31 @@ def test_parent_waits_for_a_queued_obsolete_operation_before_terminating_it(prev
     assert len(patches)==1
 
 
+def initialization_application(phase='Succeeded',revision='requested'):
+    return {'metadata':{'resourceVersion':'1'}, 'spec':{'source':{'targetRevision':'requested'}},
+            'status':{'operationState':{'phase':phase,'operation':{'sync':{'revision':revision}},
+                                      'syncResult':{'revision':revision,'resources':[
+                {'group':'batch','kind':'Job','namespace':'deployguard','name':'api-init',
+                 'hookType':'Sync','hookPhase':'Succeeded'}]}}}}
+
+
 @pytest.mark.parametrize('terminal_phase',['Succeeded','Failed'])
 def test_initialization_waits_through_hook_retries_for_the_terminal_result(terminal_phase):
-    app={'spec':{'source':{'targetRevision':'requested'}},
-         'operation':{'sync':{'revision':'requested'}},
-         'status':{'operationState':{'phase':'Running','retryCount':1,'syncResult':{
-             'revision':'requested','resources':[{'kind':'Job','hookPhase':'Failed'}]}}}}
+    app=initialization_application('Running')
+    app['operation']={'sync':{'revision':'requested'}}
+    app['status']['operationState']['retryCount']=1
+    hook=app['status']['operationState']['syncResult']['resources'][0]
+    hook['hookPhase']='Failed'
     class Fake:
-        settings=SimpleNamespace(argo_namespace='argocd')
+        settings=SimpleNamespace(argo_namespace='argocd',namespace='deployguard')
         def get(self,*args,**kwargs):
             return deepcopy(app)
         def command(self,*args,**kwargs):
             pytest.fail('A retrying operation was restarted')
         def wait(self,label,predicate):
-            if label.endswith('scheduling'):
-                assert predicate() is True
-                return
             assert predicate() is False
             app['status']['operationState']['phase']=terminal_phase
+            hook['hookPhase']=terminal_phase
             app.pop('operation')
             assert predicate() is True
     if terminal_phase=='Failed':
@@ -380,44 +397,45 @@ def test_initialization_waits_through_hook_retries_for_the_terminal_result(termi
 
 
 def test_initialization_waits_for_prior_operation_and_requests_the_exact_revision():
-    app={'spec':{'source':{'targetRevision':'requested'}},
-         'operation':{'sync':{'revision':'previous'}},
-         'status':{'operationState':{'phase':'Succeeded','syncResult':{'revision':'previous'}}}}
+    app=initialization_application(revision='previous')
+    app['operation']={'sync':{'revision':'previous'}}
     requests=[]
     class Fake:
-        settings=SimpleNamespace(argo_namespace='argocd')
+        settings=SimpleNamespace(argo_namespace='argocd',namespace='deployguard')
         def get(self,*args,**kwargs):
             return deepcopy(app)
         def command(self,*args,**kwargs):
             assert args[args.index('--type')+1]=='json'
             patch=json.loads(args[args.index('-p')+1])
             requests.append(patch)
-            app['operation']=patch[0]['value']
+            app['operation']=patch[-1]['value']
         def wait(self,label,predicate):
-            if label.endswith('scheduling'):
-                assert predicate() is False
-                app.pop('operation')
-                assert predicate() is True
-            else:
-                assert predicate() is False
-                app['status']['operationState']={'phase':'Running','syncResult':{'revision':'requested'}}
-                assert predicate() is False
-                app['status']['operationState']['phase']='Succeeded'
-                assert predicate() is False
-                app.pop('operation')
-                assert predicate() is True
+            assert predicate() is False
+            assert not requests
+            app.pop('operation')
+            assert predicate() is False
+            assert predicate() is False
+            app['status']=initialization_application('Running')['status']
+            app['status']['operationState']['operation']=deepcopy(app['operation'])
+            assert predicate() is False
+            app['status']['operationState']['phase']='Succeeded'
+            assert predicate() is False
+            app.pop('operation')
+            assert predicate() is True
     wait_initialization(Fake(),'api','requested')
-    assert requests==[[{'op':'add','path':'/operation','value':{'sync':{
-        'revision':'requested','prune':True,'syncStrategy':{'hook':{}}}}}]]
+    assert len(requests)==1
+    assert requests[0][0]=={'op':'test','path':'/metadata/resourceVersion','value':'1'}
+    assert requests[0][-1]['value']['sync']=={
+        'revision':'requested','prune':True,'syncStrategy':{'hook':{}}}
+    assert requests[0][-1]['value']['info'][0]['name']=='deployguard.io/initialization'
 
 
 @pytest.mark.parametrize('phase',['Succeeded','Failed','Error'])
 def test_initialization_checks_terminal_status_even_when_the_revision_already_matches(phase):
     class Fake:
-        settings=SimpleNamespace(argo_namespace='argocd')
+        settings=SimpleNamespace(argo_namespace='argocd',namespace='deployguard')
         def get(self,*args,**kwargs):
-            return {'spec':{'source':{'targetRevision':'requested'}},
-                    'status':{'operationState':{'phase':phase,'syncResult':{'revision':'requested'}}}}
+            return initialization_application(phase)
         def command(self,*args,**kwargs):
             pytest.fail('An existing operation was restarted')
         def wait(self,label,predicate):
@@ -427,6 +445,133 @@ def test_initialization_checks_terminal_status_even_when_the_revision_already_ma
     else:
         with pytest.raises(ConfigError,match='Initialization failed for api'):
             wait_initialization(Fake(),'api','requested')
+
+
+@pytest.mark.parametrize('resource_change,sync_change',[
+    (None,{}), ({'name':'another-init'},{}), ({'namespace':'another-namespace'},{}),
+    ({'kind':'Deployment'},{}), ({'hookType':'PostSync'},{}),
+    ({},{'resources':[{'kind':'Deployment','name':'api-workload'}]}),
+    ({},{'dryRun':True}), ({},{'syncStrategy':{'apply':{}}}),
+])
+@pytest.mark.parametrize('hook_reported',[False,True])
+def test_initialization_requires_full_hook_evidence_and_checks_the_requested_sync(resource_change,sync_change,hook_reported):
+    app=initialization_application()
+    resources=app['status']['operationState']['syncResult']['resources']
+    if resource_change is None:
+        resources.clear()
+    else:
+        resources[0].update(resource_change)
+    app['status']['operationState']['operation']['sync'].update(sync_change)
+    requests=[]
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd',namespace='deployguard')
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            request=json.loads(args[args.index('-p')+1])[-1]['value']
+            requests.append(request)
+            app['operation']=request
+        def wait(self,label,predicate):
+            assert predicate() is False
+            assert len(requests)==1
+            assert predicate() is False
+            app.pop('operation')
+            assert predicate() is False
+            app['status']['operationState']['operation']=requests[0]
+            app['status']['operationState']['syncResult']['resources']=(
+                initialization_application()['status']['operationState']['syncResult']['resources']
+                if hook_reported else [])
+            assert predicate() is True
+    if hook_reported:
+        wait_initialization(Fake(),'api','requested')
+    else:
+        with pytest.raises(ConfigError,match='without a successful full hook result'):
+            wait_initialization(Fake(),'api','requested')
+    assert len(requests)==1
+
+
+@pytest.mark.parametrize('completed',[False,True])
+def test_initialization_recognizes_accepted_requests_after_client_errors(completed):
+    app=initialization_application()
+    app['status']['operationState']['syncResult']['resources']=[]
+    requests=[]
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd',namespace='deployguard')
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            request=json.loads(args[args.index('-p')+1])[-1]['value']
+            requests.append(request)
+            assert len(requests)==1, 'An accepted initialization request was submitted twice'
+            app['metadata']['resourceVersion']='2'
+            if completed:
+                app['status']['operationState']['operation']=request
+            else:
+                app['operation']=request
+            raise ConfigError('Client lost the accepted response')
+        def wait(self,label,predicate):
+            assert predicate() is False
+            if not completed:
+                assert predicate() is False
+                app['status']['operationState']['operation']=app.pop('operation')
+            predicate()
+    with pytest.raises(ConfigError,match='without a successful full hook result'):
+        wait_initialization(Fake(),'api','requested')
+    assert len(requests)==1
+
+
+@pytest.mark.parametrize('hook_phase',['Running','Failed',None])
+def test_a_successful_operation_cannot_hide_an_unsuccessful_initialization_hook(hook_phase):
+    app=initialization_application()
+    app['status']['operationState']['syncResult']['resources'][0]['hookPhase']=hook_phase
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd',namespace='deployguard')
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            pytest.fail('An unsuccessful hook was rerun')
+        def wait(self,label,predicate):
+            predicate()
+    with pytest.raises(ConfigError,match='hook did not succeed'):
+        wait_initialization(Fake(),'api','requested')
+
+
+@pytest.mark.parametrize('concurrent_operation',[False,True])
+def test_initialization_scheduling_preserves_concurrent_operations_and_reports_patch_errors(concurrent_operation):
+    app=initialization_application(revision='previous')
+    requests=[]
+    class Fake:
+        settings=SimpleNamespace(argo_namespace='argocd',namespace='deployguard')
+        def get(self,*args,**kwargs):
+            return deepcopy(app)
+        def command(self,*args,**kwargs):
+            patch=json.loads(args[args.index('-p')+1])
+            requests.append(patch)
+            if len(requests)==1:
+                if concurrent_operation:
+                    app['metadata']['resourceVersion']='2'
+                    app['operation']={'sync':{'revision':'previous'}}
+                raise ConfigError('Patch failed')
+            assert patch[0]['value']=='3'
+            app['operation']=patch[-1]['value']
+        def wait(self,label,predicate):
+            assert predicate() is False
+            assert predicate() is False
+            assert len(requests)==1
+            app.pop('operation')
+            app['metadata']['resourceVersion']='3'
+            assert predicate() is False
+            request=app.pop('operation')
+            app['status']=initialization_application()['status']
+            app['status']['operationState']['operation']=request
+            assert predicate() is True
+    if concurrent_operation:
+        wait_initialization(Fake(),'api','requested')
+        assert len(requests)==2
+    else:
+        with pytest.raises(ConfigError,match='Patch failed'):
+            wait_initialization(Fake(),'api','requested')
+        assert len(requests)==1
 
 
 @pytest.mark.parametrize('observation_fails',[False,True])

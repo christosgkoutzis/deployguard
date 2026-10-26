@@ -56,25 +56,25 @@ A fresh `--focus e2e-tests` selects the full request-chain prerequisites while l
 
 ## Inspecting the Local Environment
 
-Examples below target the default cluster explicitly. Change the context, namespace, and names for a separate environment.
+Run these examples from the repository root after installation. They use the checkout-local tools and target the default cluster explicitly. Change the context, namespace, and names for a separate environment.
 
 ### ⚙️ Cluster Management
 
 ```bash
-k3d cluster stop control-plane-cluster
-k3d cluster start control-plane-cluster
+.local/bin/k3d cluster stop control-plane-cluster
+.local/bin/k3d cluster start control-plane-cluster
 ```
 
-Deleting a cluster removes its local environment. Use `k3d cluster delete <name>` only when intentionally resetting that specific cluster.
+Deleting a cluster removes its local environment. Use `.local/bin/k3d cluster delete <name>` only when intentionally resetting that specific cluster.
 
 ### 📦 Kubernetes & Pods
 
 ```bash
-kubectl --context k3d-control-plane-cluster -n deployguard get pods
-kubectl --context k3d-control-plane-cluster -n deployguard logs -f -l app=python-backend
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard get pods
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard logs -f -l app=python-backend
 POD_NAME=replace-with-a-pod-name
-kubectl --context k3d-control-plane-cluster -n deployguard describe pod "$POD_NAME"
-kubectl --context k3d-control-plane-cluster -n deployguard exec -it "$POD_NAME" -- /bin/sh
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard describe pod "$POD_NAME"
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard exec -it "$POD_NAME" -- /bin/sh
 ```
 
 Use sync for source changes; Skaffold rebuilds the affected image and ArgoCD deploys its new reference.
@@ -82,9 +82,9 @@ Use sync for source changes; Skaffold rebuilds the affected image and ArgoCD dep
 ### 🔌 Database & Broker Access
 
 ```bash
-kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/postgres 5432:5432
-kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/redis-master 6379:6379
-kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/rabbitmq 5672:5672
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/postgres 5432:5432
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/redis-master 6379:6379
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/rabbitmq 5672:5672
 ```
 
 These commands run until stopped and expose the selected database or broker locally.
@@ -92,8 +92,8 @@ These commands run until stopped and expose the selected database or broker loca
 ### ☸️ Helm & GitOps
 
 ```bash
-kubectl --context k3d-control-plane-cluster -n argocd get applications
-helm --kube-context k3d-control-plane-cluster list -n argocd
+.local/bin/kubectl --context k3d-control-plane-cluster -n argocd get applications
+.local/bin/helm --kube-context k3d-control-plane-cluster list -n argocd
 ```
 
 Helm lists bootstrap releases; ArgoCD renders and reconciles application charts. Use its dashboard for per-application events and initialization-hook failures.

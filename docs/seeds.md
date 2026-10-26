@@ -24,7 +24,7 @@ Job names include a hash of generated configuration, files, the image reference,
 
 ## 2. Service Initialization (Application Data)
 
-Keep migrations and application seed scripts in the web service or worker build context so they are included in its image. Declare an `init_command` or `INIT_COMMAND` env entry. Test programs handle preparation themselves instead of using initialization hooks.
+Keep migrations and application seed scripts in the web service or worker build context so they are included in its image. Declare an `init_command` or `INIT_COMMAND` env entry; `init_command` takes precedence when both are set. Test programs handle preparation themselves instead of using initialization hooks.
 
 ```yaml
 services:
@@ -35,7 +35,7 @@ services:
 
 Initialization uses an ArgoCD `Sync` hook in wave 1, after any ExternalSecret in wave 0 and before the Deployment in wave 2. It uses the service image, environment, Secret references, and resources. Commands run through `/bin/sh -c` in the image's working directory.
 
-Hooks run on each deployment sync for the selected service. Initialization waits for the recorded deployment revision and reports a failed ArgoCD operation as a deployment failure. ArgoCD retries automatic synchronizations up to three times; DeployGuard waits for the result within `TIMEOUT_SECONDS`. Successful hooks are removed; failed hooks remain until a subsequent attempt replaces them, including an automatic retry. Images using initialization commands need a shell. Commands must be safe to repeat; applications should coordinate concurrent migrations when needed.
+Hooks run on each deployment sync for the selected service. Success requires ArgoCD to report that service's initialization Job as succeeded for the recorded deployment revision. If reconciliation completes without a hook result, DeployGuard requests a full hook-enabled sync; missing or unsuccessful initialization results prevent success. ArgoCD retries automatic synchronizations up to three times; DeployGuard waits for the result within `TIMEOUT_SECONDS`. Successful hooks are removed; failed hooks remain until a subsequent attempt replaces them, including an automatic retry. Images using initialization commands need a shell. Commands must be safe to repeat; applications should coordinate concurrent migrations when needed.
 
 ## Execution and Failures
 

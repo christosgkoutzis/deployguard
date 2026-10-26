@@ -141,27 +141,56 @@ def report_application_failure(kube, topology, name, revision):
 
 
 def wait_initialization(kube, name, revision):
-    def available():
-        obj = kube.get('application', name, kube.settings.argo_namespace)
-        pending = obj.get('operation')
-        return (obj.get('spec', {}).get('source', {}).get('targetRevision') == revision and
-                (not pending or pending.get('sync', {}).get('revision') == revision))
-    kube.wait(f'{name} initialization scheduling', available)
-    obj = kube.get('application', name, kube.settings.argo_namespace)
-    operation = obj.get('status', {}).get('operationState', {})
-    if operation.get('syncResult', {}).get('revision') != revision and not obj.get('operation'):
-        kube.command('-n', kube.settings.argo_namespace, 'patch', 'application', name,
-                     '--type', 'json', '-p', json.dumps([{'op':'add', 'path':'/operation',
-                         'value':{'sync':{'revision':revision, 'prune':True,
-                                          'syncStrategy':{'hook':{}}}}}]), capture=True)
+    request_info = {'name':'deployguard.io/initialization', 'value':uuid.uuid4().hex}
+    requested = False
     def initialized():
+        nonlocal requested
         current = kube.get('application', name, kube.settings.argo_namespace)
-        operation = current.get('status', {}).get('operationState', {})
-        if operation.get('syncResult', {}).get('revision') != revision:
+        if current.get('spec', {}).get('source', {}).get('targetRevision') != revision:
             return False
-        if operation.get('phase') in ['Failed', 'Error']:
-            raise ConfigError(f'Initialization failed for {name}')
-        return operation.get('phase') == 'Succeeded' and not current.get('operation')
+        operation = current.get('status', {}).get('operationState', {})
+        result = operation.get('syncResult', {})
+        phase = operation.get('phase')
+        if result.get('revision') == revision:
+            if phase in ['Failed', 'Error']:
+                raise ConfigError(f'Initialization failed for {name}')
+            if phase == 'Succeeded' and not current.get('operation'):
+                sync = operation.get('operation', {}).get('sync', {})
+                full_hook_sync = (not sync.get('resources') and not sync.get('dryRun')
+                                  and 'apply' not in sync.get('syncStrategy', {}))
+                hooks = [resource for resource in result.get('resources', [])
+                         if resource.get('group') == 'batch' and resource.get('kind') == 'Job'
+                         and resource.get('namespace') == kube.settings.namespace
+                         and resource.get('name') == f'{name}-init' and resource.get('hookType') == 'Sync']
+                if full_hook_sync and hooks:
+                    if all(hook.get('hookPhase') == 'Succeeded' for hook in hooks):
+                        print(f'INFO: Initialization succeeded for {name} at {revision}', flush=True)
+                        return True
+                    raise ConfigError(f'Initialization failed for {name}: hook did not succeed')
+                if requested and request_info in operation.get('operation', {}).get('info', []):
+                    raise ConfigError(f'Initialization failed for {name}: sync completed without a successful full hook result')
+        if current.get('operation') or phase in ['Running', 'Terminating'] or requested:
+            return False
+        # A full hook sync supplies initialization evidence when reconciliation skipped hooks.
+        resource_version = current['metadata']['resourceVersion']
+        patch = [{'op':'test', 'path':'/metadata/resourceVersion', 'value':resource_version},
+                 {'op':'add', 'path':'/operation', 'value':{'info':[request_info],
+                     'sync':{'revision':revision, 'prune':True, 'syncStrategy':{'hook':{}}}}}]
+        try:
+            kube.command('-n', kube.settings.argo_namespace, 'patch', 'application', name,
+                         '--type', 'json', '-p', json.dumps(patch), capture=True)
+        except ConfigError:
+            latest = kube.get('application', name, kube.settings.argo_namespace)
+            pending = latest.get('operation') or {}
+            recorded = latest.get('status', {}).get('operationState', {}).get('operation', {})
+            requested = (request_info in pending.get('info', [])
+                         or request_info in recorded.get('info', []))
+            if not requested and latest['metadata']['resourceVersion'] == resource_version:
+                raise
+            return False
+        requested = True
+        print(f'INFO: Requested initialization hooks for {name} at {revision}', flush=True)
+        return False
     kube.wait(f'{name} initialization', initialized)
 
 
@@ -397,7 +426,7 @@ def failure_message(error):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='./scripts/deployguard', description='DeployGuard standalone local development tool',
+    parser = argparse.ArgumentParser(prog='./scripts/deployguard', description='DeployGuard: a local Kubernetes GitOps lab for microservice integration testing and platform experimentation.',
         epilog='Install this checkout with ./scripts/deployguard install [--assessment].')
     parser.add_argument('--topology')
     commands = parser.add_subparsers(dest='command',required=True)

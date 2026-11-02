@@ -1,111 +1,225 @@
-# Services & Workers
+# Services and workers
 
-Declare application services and background workers under `services` in your topology. DeployGuard builds their Docker contexts and deploys them with the appropriate chart.
+A service is application code built from a local Dockerfile. DeployGuard can run it as a web service, a background worker, or a test Job.
 
-## Required Service Location & Files
+## Run a small API
 
-1. Application services default to `services/<name>/`; test services default to `tests/<name>/`.
-2. Custom build_path values point to local Docker contexts relative to the topology.
-3. Every context must contain a file named `Dockerfile`.
-4. Names must be unique lowercase DNS labels of at most 40 characters.
+Create the following three files in your checkout. Run commands from the repository root. The examples in the other guides build on this API.
 
-## Workload Archetypes
+`my-app/api/server.py`:
 
-- webservice (default): Deployment, internal Service, Ingress, and HTTP readiness probe.
-- worker: Deployment without an HTTP probe, Service, or Ingress.
-- test: Suspended Job executed through the [test runner](tests.md).
+```python
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from urllib.request import urlopen
 
-## Required Runtime Shape
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            data = {"status": "ok"}
+        elif self.path == "/greeting":
+            data = {"message": os.getenv("MESSAGE", "Hello from sample-api")}
+            if os.getenv("GREETING_URL"):
+                with urlopen(os.environ["GREETING_URL"], timeout=5) as response:
+                    data["external"] = json.load(response)
+        else:
+            self.send_error(404)
+            return
+        body = json.dumps(data).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-Applications use a single-container stateless Deployment, or a single-container test Job. Web applications must listen on all interfaces and expose a successful HTTP health endpoint. Workers must remain running without needing an HTTP port.
+ThreadingHTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
+```
+
+`my-app/api/Dockerfile`:
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY server.py .
+CMD ["python", "server.py"]
+```
+
+`my-app/deployguard.yaml`:
 
 ```yaml
+apiVersion: deployguard/v1
+name: deployguard
 services:
   - name: sample-api
-    build_path: ./backend/sample-api
-    port: 3000
-    health_endpoint: /api/status
-    resources:
-      requests: {cpu: 100m, memory: 128Mi}
-      limits: {memory: 256Mi}
-  - name: queue-consumer
+    build_path: api
+    port: 8000
+    health_endpoint: /health
+```
+
+After installing [the local tools](get-started.md#1-install), run:
+
+```bash
+./scripts/deployguard validate --topology my-app/deployguard.yaml
+./scripts/deployguard setup --topology my-app/deployguard.yaml
+./scripts/deployguard bootstrap --topology my-app/deployguard.yaml
+./scripts/deployguard sync --topology my-app/deployguard.yaml
+curl --fail http://sample-api.127.0.0.1.nip.io:8080/greeting
+```
+
+The response is `{"message": "Hello from sample-api"}`.
+
+The custom topology uses the same `name` and configured cluster as the demo. It can be deployed from the same checkout; unselected demo applications remain until you explicitly prune them. Do not change the environment name within an existing checkout's generated state. Use a separate checkout and cluster settings for isolation.
+
+Each example below replaces `my-app/deployguard.yaml` with a complete configuration. Examples in other guides also start from this API; they are alternatives, not YAML blocks to concatenate.
+
+## Add a worker
+
+Create two more files.
+
+`my-app/worker/worker.py`:
+
+```python
+import os
+import time
+from urllib.request import urlopen
+
+while True:
+    with urlopen(os.environ["API_URL"] + "/greeting", timeout=5) as response:
+        print(response.read().decode(), flush=True)
+    time.sleep(10)
+```
+
+`my-app/worker/Dockerfile`:
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY worker.py .
+CMD ["python", "-u", "worker.py"]
+```
+
+Replace `my-app/deployguard.yaml`:
+
+```yaml
+name: deployguard
+services:
+  - name: sample-api
+    build_path: api
+  - name: sample-worker
     type: worker
-    build_path: ./background/consumer
+    build_path: worker
     depends_on: [sample-api]
-```
-
-Web service defaults are port 8000, health path /health, and one replica. Their internal Service is `<name>-service` on port 80; other pods use `http://<name>-service:80`. Web service and worker Deployments are named `<name>-workload`. Workers have no Service or Ingress.
-
-## Customizing Environment Variables
-
-An env_file is parsed as dotenv data, not sourced as shell code. It resolves inside the build context. Inline env entries override the file; surrounding quotes are accepted. Placeholders resolve from the repository .env and process environment, with process variables taking precedence. Missing variables and duplicate inline keys are errors.
-
-```yaml
-services:
-  - name: sample-api
-    build_path: ./backend/sample-api
-    env_file: .env.development
     env:
-      - APP_MODE=local
-      - PUBLIC_URL=http://sample-api.${CLUSTER_DOMAIN}:${INGRESS_PORT}
-    command: [python, server.py]
-    args: [--verbose]
+      - API_URL=http://sample-api-service:80
 ```
 
-Command and args are container argument arrays; repeated flags and arguments are allowed. For web services and workers, an init_command or INIT_COMMAND env entry defines an initialization hook; see [Seeds](seeds.md). Test programs handle their own preparation; validation rejects these initialization settings for test services.
+```bash
+./scripts/deployguard sync --topology my-app/deployguard.yaml --focus sample-worker
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard logs deployment/sample-worker-workload --tail=10
+```
 
-## Secrets Management
+The worker prints the API's greeting every ten seconds. A web service gets a Deployment, Service, Ingress, and HTTP readiness probe. A worker gets a Deployment with no HTTP probe, Service, or Ingress. Worker readiness does not prove that its work is succeeding.
 
-Services that do not need secrets require no Vault or ESO configuration. For local credentials, declare a Kubernetes Secret and refer to its keys:
+## Set environment variables
+
+Save `my-app/api/app.env`:
+
+```dotenv
+MESSAGE=Hello from app.env
+```
+
+Replace `my-app/deployguard.yaml`:
 
 ```yaml
-secrets:
-  - name: database-credentials
-    values:
-      password: DATABASE_PASSWORD
+name: deployguard
 services:
   - name: sample-api
-    secret_env:
-      DB_PASSWORD: {name: database-credentials, key: password}
+    build_path: api
+    env_file: app.env
+    env:
+      - MESSAGE=Hello from the topology
 ```
 
-Set DATABASE_PASSWORD in your .env or terminal environment. DeployGuard writes its value directly to the Kubernetes Secret; generated deployment configuration contains only the Secret name and key. `env_from: [database-credentials]` imports every key. Do not duplicate a variable in env and secret_env.
+```bash
+./scripts/deployguard sync --topology my-app/deployguard.yaml
+curl --fail http://sample-api.127.0.0.1.nip.io:8080/greeting
+```
 
-External Secrets Operator (ESO) reads credentials from Vault into Kubernetes Secrets for your services. To use Vault KV v2, declare a secret store and service binding:
+The message is `Hello from the topology`: inline `env` overrides `env_file`. The file is parsed as dotenv data, not executed as shell code.
+
+`${VARIABLE}` placeholders read from the repository's `.env` or process environment, with process variables taking precedence. Missing variables and duplicate inline keys are errors.
+
+## Supply a password through a Secret
+
+The installer-created `.env` already declares `POSTGRES_PASSWORD`. Review that local password, then replace `my-app/deployguard.yaml`:
 
 ```yaml
+name: deployguard
 secrets:
-  - name: vault-token
+  - name: sample-credentials
+    values: {password: POSTGRES_PASSWORD}
+services:
+  - name: sample-api
+    build_path: api
+    secret_env:
+      DB_PASSWORD: {name: sample-credentials, key: password}
+```
+
+`POSTGRES_PASSWORD` is the host variable; `password` is the Kubernetes Secret key; `DB_PASSWORD` is the variable delivered to the container. The sample API does not use a database, but you can check the binding without printing the password:
+
+```bash
+./scripts/deployguard sync --topology my-app/deployguard.yaml
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard exec deployment/sample-api-workload -- python -c 'import os; assert os.environ["DB_PASSWORD"]; print("Password is configured")'
+```
+
+`env_from: [sample-credentials]` instead imports every Secret key under its own name. Do not repeat a variable in both `env` and `secret_env`. Keep credentials out of ordinary `env` entries: those entries enter generated Git snapshots; Secret values are sent directly to Kubernetes.
+
+## Optional Vault bindings
+
+Vault KV v2 can supply container environment variables through External Secrets Operator. An already initialized Vault server does not need a DeployGuard seeder.
+
+For a concrete example, first run the bundled demo, which starts Vault and seeds `deployguard/python-backend`. Then replace `my-app/deployguard.yaml` with:
+
+```yaml
+name: deployguard
+secrets:
+  - name: sample-vault-token
     values: {token: VAULT_ROOT_TOKEN}
 secret_stores:
-  - name: vault-store
+  - name: sample-vault
     server: http://vault.${NAMESPACE}.svc.cluster.local:8200
     path: secret
-    token_secret: {name: vault-token, key: token}
-    depends_on: [vault-seeder]
+    token_secret: {name: sample-vault-token, key: token}
 services:
   - name: sample-api
+    build_path: api
     external_secret:
-      store: vault-store
-      path: applications/sample-api
+      store: sample-vault
+      path: deployguard/python-backend
 ```
 
-Use a namespace-qualified Vault address: ESO connects from the `external-secrets` namespace, so a short hostname such as `vault` does not resolve to the application namespace. `${NAMESPACE}` uses your configured application namespace.
+```bash
+./scripts/deployguard bootstrap --topology my-app/deployguard.yaml
+./scripts/deployguard sync --topology my-app/deployguard.yaml
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard exec deployment/sample-api-workload -- python -c 'import os; assert os.environ["DB_URL"]; print("Vault value is configured")'
+```
 
-Declare vault-seeder and its Vault prerequisite in the same topology. The store dependency is added automatically to the service graph. ESO extracts the path into `<name>-secret`; startup waits for successful synchronization. Rerun bootstrap when adding stores to an operator-free cluster.
+This example reuses the running demo Vault. Do not prune its applications while using it. For your own Vault, change the server, token source, and KV path. If a topology also starts or seeds Vault, declare those prerequisites with `depends_on`, as the demo does.
 
-On sync, DeployGuard refreshes managed ExternalSecrets and rolls selected Deployments and StatefulSets when their referenced Secret versions change. Vault changes require another sync to reach running containers; DeployGuard does not add a background restart controller.
+ESO runs in `external-secrets`, so an in-cluster Vault address must resolve from that namespace. Short names such as `vault` refer to a service in ESO's own namespace; the namespace-qualified address above reaches the demo Vault.
 
-Kubernetes Secrets and Vault dev mode serve the disposable local environment. Secret references do not encrypt local files or turn this into a production secrets platform.
+Each sync refreshes managed ExternalSecrets and restarts selected Deployments or StatefulSets when referenced Secret versions change. A Vault change needs another sync to reach running containers. Secret references do not encrypt local files; Vault dev mode and this setup are for local use.
 
-## Explicitly Unsupported Cases
+## Requirements and limits
 
-1. Multi-container pods or workloads requiring sidecars.
-2. Stateful application clustering through service fields; use a dependency chart.
-3. Web services without an HTTP health endpoint.
-4. Advanced ingress, mTLS, or network policy configuration through service fields.
-5. Direct remote Git onboarding; build input must be a local folder.
-6. Custom Dockerfile names, build arguments, or build secrets through topology fields. Runtime Secret references apply to deployed containers, not image builds.
-7. Prebuilt application images through service fields; services are built from their local contexts. Dependency charts can use their own image references.
+- Every service build context needs a file named `Dockerfile`. Paths resolve relative to the topology. Defaults are `services/<name>/`, or `tests/<name>/` for test services.
+- Names are unique lowercase DNS labels, at most 40 characters.
+- Web services listen on all interfaces and expose a successful HTTP health endpoint. Defaults are port 8000, `/health`, and one replica.
+- Internal web Services are `<name>-service` on port 80; Deployments are `<name>-workload`.
+- `command` overrides the container entry point and `args` supplies its arguments. Both are arrays; shell operators need an explicit shell.
+- `resources` accepts Kubernetes requests and limits. Set them for your application rather than copying a budget from another service.
+- Application charts use a single container. Service fields do not support sidecars, stateful clustering, advanced ingress/TLS, network policies, or prebuilt images.
+- Builds use local folders. Topology fields do not configure remote Git checkout, custom Dockerfile names, build arguments, or build secrets.
 
-Use a custom dependency chart for Kubernetes shapes outside these archetypes.
+Use a [dependency chart](dependencies.md) for other Kubernetes shapes. See [initialization](seeds.md) for migrations and [tests](tests.md) for test Jobs.

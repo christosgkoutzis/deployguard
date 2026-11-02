@@ -1,41 +1,71 @@
-# Verification & Test Runner
+# Verify deployments and run tests
 
-DeployGuard verifies the selected environment and runs integration suites as Kubernetes Jobs on the cluster network.
+These commands answer different questions:
 
-## Test Archetype
+| Command | Question | What it checks |
+| --- | --- | --- |
+| `validate` | Can DeployGuard read this configuration? | Topology fields, local files, references, and dependency order |
+| `sync` | Can this environment be deployed? | Builds, deployment, initialization, and readiness |
+| `verify` | Is the last selected deployment still ready? | Recorded configuration, requested ArgoCD revisions, dependency health, rollouts, and HTTP health endpoints |
+| `test <name>` | Does the application behave as expected? | A test program's exit status, run as a Kubernetes Job |
 
-Declare a service with `type: test`. Its default context is `tests/<name>/`, or supply `build_path`. Declare every prerequisite the suite needs, including workers and mocks.
+Sync already verifies readiness. Use `verify` to recheck later without rebuilding. A running worker or a successful health endpoint does not prove that a message was processed; write integration tests for that behavior.
+
+## Write a test for the sample API
+
+First create the files from the [small API example](services.md#run-a-small-api).
+
+Save `my-app/tests/checks.py`:
+
+```python
+import json
+import os
+from urllib.request import urlopen
+
+with urlopen(os.environ["TARGET_URL"] + "/greeting", timeout=10) as response:
+    body = json.load(response)
+assert body["message"] == "Hello from sample-api", body
+print("sample-api returned the expected greeting")
+```
+
+Save `my-app/tests/Dockerfile`:
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY checks.py .
+CMD ["python", "checks.py"]
+```
+
+Replace `my-app/deployguard.yaml` with this complete configuration:
 
 ```yaml
+name: deployguard
 services:
-  - name: integration-tests
+  - name: sample-api
+    build_path: api
+  - name: sample-tests
     type: test
-    build_path: ./test-suites/integration
-    depends_on: [sample-api, queue-consumer, external-api-mock]
+    build_path: tests
+    depends_on: [sample-api]
     env:
       - TARGET_URL=http://sample-api-service:80
     timeout: 600
 ```
 
-Declare the referenced entities in the same topology. Sync registers a suspended Job without a readiness probe, Service, or Ingress. A successful deployment does not imply successful test execution.
-
-Keep test data preparation inside the test program or its entry point. Test services do not support `init_command` or `INIT_COMMAND`; validation rejects these settings.
-
-## Running Verification Checks
-
 ```bash
-./scripts/deployguard verify
+./scripts/deployguard validate --topology my-app/deployguard.yaml
+./scripts/deployguard sync --topology my-app/deployguard.yaml --focus sample-tests
+./scripts/deployguard test sample-tests --topology my-app/deployguard.yaml
 ```
 
-Verification reads `.local/state/inventory.json`, confirms the topology has not changed since sync, and checks the last selected entities. It waits for the requested ArgoCD revisions, healthy child Applications, completed platform seeds, Deployment rollout, and ingress health for web services and mocks. Dependency health covers the resources ArgoCD assesses, including PVCs. Workers need Deployment readiness without HTTP.
+The test prints `sample-api returned the expected greeting`. DeployGuard then reports `sample-tests Job completed`.
 
-Sync verifies automatically; the separate command rechecks later. Retained unselected applications do not block the selected deployment; their own health status remains visible in ArgoCD. Selected deployment applications must reach the requested revision and pass their health checks. Test Job outcomes are checked by the test command and do not block deployment verification.
+Keep test data preparation in the test program or its entry point. Validation rejects `init_command` and `INIT_COMMAND` on test services.
 
-After a failed sync, correct the configuration or source and run sync again. DeployGuard coordinates pending ArgoCD work with the newly requested snapshot.
+## Run and repeat tests
 
-## Running Test Suites
-
-For the bundled demo:
+For the bundled demo, list and run its suite with:
 
 ```bash
 ./scripts/deployguard list-tests
@@ -43,33 +73,43 @@ For the bundled demo:
 ./scripts/deployguard test e2e-tests
 ```
 
-Each execution creates a new run ID in the generated snapshot. ArgoCD replaces the Job, and the runner waits for that Job's unique identity before following logs. Success requires `Complete=True` on that same Job. Failed Jobs, removed or replaced executions, and timeouts return nonzero status; Running pods and previously completed Jobs cannot satisfy it. Test Applications disable automatic sync retries and self-healing, and test Jobs use zero retries. Repeat the test command to rerun a suite, including after a failed execution. Sync alone registers suspended Jobs.
+Use `--topology my-app/deployguard.yaml` on each command for a custom topology.
 
-For your own suite, replace `e2e-tests` with its declared name. Tests must be selected in the last sync. The runner verifies that suite's prerequisites and reuses its deployed chart, configuration, and image. Other application revisions and test executions remain unchanged. Source or environment edits need another sync before execution.
+Declare every prerequisite in `depends_on`, including workers and mocks. A suite must be selected by the last sync before it can run. Retained, unselected applications do not block its checks.
 
-## CI/CD Guardrails
+Sync registers test Jobs in a suspended state; it does not execute tests. Each `test` command verifies the suite's prerequisites, starts a new execution, follows its logs, and waits for that same Job to complete. Failed, deleted, replaced, or timed-out executions return an error. A previous successful Job cannot satisfy a new run.
 
-The workflow runs on pull requests targeting master, pushes to master, and manual dispatch. It checks the demo and an independent custom topology on disposable Linux amd64 runners.
+Test Jobs use zero retries, and their ArgoCD Applications disable automatic retries and self-healing. Run `test` again to repeat a suite. Only that suite is replaced; other tests and application revisions remain unchanged. Job completion determines success; log streaming alone does not.
 
-| Job | Coverage |
+After source, environment, or topology edits, run `sync` before testing. The test command reuses deployed images and configuration. `verify` checks recorded topology configuration; it does not detect source edits or rebuild images.
+
+## What CI checks
+
+The workflow runs on pull requests to master, pushes to master, and manual dispatch.
+
+| Job | Purpose |
 | --- | --- |
-| `static-and-unit-tests` | Syntax, schema and topology validation, unit tests, and Helm rendering; includes isolation, locking, cleanup, lifecycle policies and configuration rules |
-| `end-to-end-tests` | The demo's HTTP, database, messaging, cache, search and signed CSV download flows; Vault/ESO propagation, deployment selection, generated Git credential scans, and repeated sync/test execution |
-| `deployment-lifecycle-tests` | An operator-free custom topology: paths, ports, environment and Secret handling, source and mock updates, seeds, focus retention/pruning, isolated Jobs, failures and recovery |
-| `all-tests-passed` | Collects the other jobs' results and fails if any failed, was cancelled or was skipped; runs no tests itself |
+| `static-and-unit-tests` | Checks syntax and topology rules, runs unit tests, and renders Helm charts without creating a cluster. |
+| `end-to-end-tests` | Deploys the demo and tests its HTTP, database, Kafka, RabbitMQ, cache, search, Vault/ESO, and signed CSV flows. |
+| `deployment-lifecycle-tests` | Uses a separate sample environment to test updates, secrets, initialization, mocks, selection, pruning, test execution, and failure recovery. |
+| `all-tests-passed` | Fails unless all three test jobs succeed; it runs no additional tests. |
 
-End-to-end tests bootstrap one cluster, deploy and verify the focused environment, and run its suites and repeated sync/test checks. Only after those steps pass does the job expand to the full topology and repeat verification and tests. The full stage reuses the cluster and build cache. A focused-stage failure skips full expansion; failure diagnostics and cleanup still run.
+The end-to-end job creates one cluster. It first deploys and tests the focused environment, including repeated syncs and test runs. Only after that succeeds does it expand to the full demo on the same cluster, reusing the build cache. The lifecycle job needs a separate cluster to check a topology without Vault or ESO.
 
-Each functional job bootstraps its own cluster once. The demo includes Vault and ESO; the custom topology runs without them. Failure tests check the actual failed execution and subsequent recovery. Initialization failure checks require the new hook's expected exit code and a deployment error; unexpected results include Application operation diagnostics even when health appears successful. CI also checks that a changed Vault value reaches a restarted container, then restores it. Failed jobs collect cluster diagnostics before cleanup. `./scripts/deployguard assess` runs only in GitHub Actions.
+The lifecycle checks deliberately introduce failures: a crashing worker, an unavailable chart, a failed initialization command, a failed test, and an unknown focus name. Those commands must fail, and recovery must then succeed. The whole job passes only when those expectations are met.
 
-Configure branch protection to require `all-tests-passed` if you want merges gated on the complete test workflow. A green run demonstrates this coverage on the tested toolchain and runner; it cannot prove every third-party chart, application, architecture, or host configuration works.
+The demo checks also change a Vault value, confirm that it reaches a restarted container, and restore it. Both functional jobs collect diagnostics on failure before deleting their runner resources.
 
-## Local Static Checks
+CI runs on Linux amd64. A green run covers the supplied environments and tested toolchain; it cannot guarantee an arbitrary application, chart, host, or architecture. Require `all-tests-passed` in branch protection to gate merges on the full workflow.
 
-After installation, run:
+## Check syntax locally
+
+After installation:
 
 ```bash
 ./scripts/deployguard check
 ```
 
-The checker reads syntax/schema without importing applications, running services, or contacting a cluster. CI installs the assessment dependencies with `./scripts/deployguard install --assessment` and runs unit tests and offline Helm chart checks. See [Test Scenario](test-scenario.md) to deploy and verify the included demo.
+This reads code and schema syntax without starting applications or contacting a cluster. It does not validate Markdown examples or execute tests. CI separately installs assessment dependencies, runs the unit suite, and checks Helm rendering.
+
+`./scripts/deployguard assess` is reserved for GitHub Actions. For normal use, follow [Get started](get-started.md) or the [demo walkthrough](test-scenario.md).

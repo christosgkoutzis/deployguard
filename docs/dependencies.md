@@ -1,72 +1,113 @@
-# External Dependencies & Ecosystem
+# Databases and other dependencies
 
-DeployGuard deploys databases, message brokers, and other tools through Helm charts managed by ArgoCD. Message brokers such as Kafka and RabbitMQ pass events or queued tasks between applications. Dependencies use their chart images and are not built from your application source.
+Use `dependencies` for software supplied by a Helm chart, such as PostgreSQL or RabbitMQ. DeployGuard builds your application images; the dependency chart chooses its own images and Kubernetes resources.
 
-## The Core Concept
+## Add PostgreSQL
 
-Declare dependencies under `dependencies`. Choose an exact-version remote chart or a local chart containing `Chart.yaml`. Local paths and values files resolve relative to the topology. ArgoCD fetches remote charts; local charts are copied into generated Git snapshots.
+Install and bootstrap the cluster using [Get started](get-started.md). Save this complete configuration as `my-app/deployguard.yaml`, creating the directory in your editor if needed:
 
 ```yaml
+name: deployguard
 secrets:
-  - name: database-credentials
-    values: {password: DATABASE_PASSWORD}
+  - name: sample-db-credentials
+    values: {password: POSTGRES_PASSWORD}
 dependencies:
-  - name: postgres
+  - name: sample-postgres
     repo: https://charts.bitnami.com/bitnami
     chart: postgresql
     version: "18.8.13"
     set:
-      - fullnameOverride=postgres
+      - fullnameOverride=sample-postgres
       - architecture=standalone
-      - auth.existingSecret=database-credentials
+      - auth.existingSecret=sample-db-credentials
       - auth.secretKeys.adminPasswordKey=password
     values:
       primary:
         persistence: {size: 100Mi}
 ```
 
-Pin exact chart versions; floating versions and ranges are rejected. Dotted and indexed `set` keys use native Helm parameters. A `values_file` supplies a YAML mapping, overlaid with inline `values`: inline entries replace top-level keys rather than recursively merging them. Explicit `set` parameters take final precedence.
+`POSTGRES_PASSWORD` comes from the checkout's `.env`, created during installation. Choose its value before the first deployment.
 
-## Required Assumptions & Constraints
+```bash
+./scripts/deployguard validate --topology my-app/deployguard.yaml
+./scripts/deployguard sync --topology my-app/deployguard.yaml
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard get service sample-postgres
+```
 
-1. Dependencies deploy charts; DeployGuard does not search them for Dockerfiles.
-2. Declare prerequisites with `depends_on`, including other charts or seeds.
-3. Local chart `file://` subcharts are copied recursively. Vendor remote subcharts into `charts/` first; sync does not edit source charts or run dependency updates there.
-4. Initialize application schemas with service hooks, and shared infrastructure with [platform seeds](seeds.md).
-5. Configure private Helm access through ArgoCD's native repository credentials.
+The database is reachable inside the application namespace at `sample-postgres:5432`, with user `postgres` and database `postgres`. The chart uses a persistent volume. It reads its password from the declared Kubernetes Secret.
 
-Use chart-native `existingSecret` options or Secret references for credentials. A credential in `set`, `values`, or a values file would enter generated Git history and is rejected when it matches a declared secret source. Keep credentials out of source chart files as well. Selected Deployment and StatefulSet consumers are rolled when their Secret versions change. Changing a Secret does not itself change a password stored inside a database; use the dependency's supported credential-update procedure. Third-party settings remain governed by each chart's documented API.
+Adding a database does not configure an application to use it. Your application still needs its database client, connection settings, and schema. The [initialization guide](seeds.md#initialize-shared-data) extends this example with a SQL seed.
 
-## Built-In Local Kafka Design
+Like the [API example](services.md), this uses the configured cluster and environment name. Previously deployed applications remain unless you request `--prune`.
 
-The committed `platform/dependencies/confluent-kafka-chart` runs the demo's single-node Confluent Kafka broker in KRaft mode with image version `8.0.6`. It exposes `kafka:9092`, disables service-link environment injection, and uses ephemeral `emptyDir` storage. It provides local development messaging, without production durability.
+## Use a local chart
 
-## Built-In Local RabbitMQ
+This alternative configuration uses the Kafka chart already in the repository. Replace `my-app/deployguard.yaml` with:
 
-The committed `platform/dependencies/rabbitmq-instance-chart` runs the demo's single-node `rabbitmq:3-management` instance with ephemeral storage. It reads its password from a Kubernetes Secret and uses native RabbitMQ readiness diagnostics. The Service is `rabbitmq`, exposing AMQP on port 5672 and management on port 15672.
+```yaml
+name: deployguard
+dependencies:
+  - name: sample-kafka
+    path: ../platform/dependencies/confluent-kafka-chart
+```
 
-## Demo Object Storage
+```bash
+./scripts/deployguard validate --topology my-app/deployguard.yaml
+./scripts/deployguard sync --topology my-app/deployguard.yaml
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard get service sample-kafka
+```
 
-The demo uses [SeaweedFS Community Edition](https://github.com/seaweedfs/seaweedfs) (Apache 2.0) through its upstream Helm chart. Its all-in-one mode runs storage and the S3 gateway in one pod. The chart version and multi-architecture project image digest are pinned in `deployguard.yaml`.
+The chart exposes `sample-kafka:9092` inside the namespace. It runs one Kafka broker in KRaft mode, with temporary storage. Local chart paths resolve relative to the topology file and must contain `Chart.yaml`.
 
-The S3 endpoint is `http://seaweedfs-all-in-one:8333`. SeaweedFS reads `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from `platform-bootstrap-secrets` as AWS credential environment variables, which enable authenticated S3 access. Set these values in `.env`; the applications and Vault seed use the same credentials. Data uses `emptyDir` storage and is lost when the pod is replaced. Reports use path-style requests and Signature Version 4 presigned URLs.
+Use `depends_on` when a chart needs another declared dependency or seed first. Local `file://` subcharts are copied with their parent. Download remote subcharts into the chart's `charts/` directory before syncing; DeployGuard does not run dependency updates in your source directories.
 
-These are optional local dependencies. Other topologies can choose different native charts or tools.
+## Configure chart values
 
-## Platform Ecosystem & Observability
+A remote dependency needs `repo`, `chart`, and an exact `version`. A local dependency needs `path`. Chart settings come from:
 
-With the default configuration and full demo selected:
+1. `values_file`: a YAML mapping, relative to the topology file.
+2. `values`: inline entries replace matching **top-level** keys from that file.
+3. `set`: Helm parameters take final precedence.
 
-- **ArgoCD Dashboard:** `http://argocd.127.0.0.1.nip.io:8080`, username admin.
-- **Dozzle:** `http://dozzle.127.0.0.1.nip.io:8080`, for live pod logs.
-- **Kafbat UI:** `http://kafka-ui.127.0.0.1.nip.io:8080`, for topics and events.
+For example, inline `values.primary` replaces the whole `primary` entry from `values_file`. Include all required fields there; these two mappings are not recursively merged. Settings such as `auth.existingSecret` belong to the dependency chart's API.
 
-Adjust the domain and port for your settings. Dozzle and Kafbat are ordinary demo dependencies, excluded from a fresh `--focus e2e-tests` deployment.
+For private charts, configure [ArgoCD repository credentials](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/). ArgoCD fetches remote charts; host-side Helm credentials alone do not configure that access.
 
-From the repository root, retrieve the ArgoCD initial password using the installed kubectl:
+## Keep passwords in Secrets
+
+Use each chart's Secret reference settings, such as `auth.existingSecret` above. Values in `set`, `values`, files, or source charts enter the generated Git repository. Sync rejects generated values that match declared Secret source values; this does not replace reviewing your configuration for credentials.
+
+On sync, DeployGuard restarts selected Deployments and StatefulSets whose referenced Secret versions changed. Updating a Kubernetes Secret does not change a password already stored inside a database. Follow the chart's credential rotation procedure.
+
+## Dependencies in the demo
+
+The bundled topology supplies PostgreSQL, Redis, Kafka, RabbitMQ, Elasticsearch, Vault, and SeaweedFS. Versions and chart settings are in `deployguard.yaml`.
+
+- Kafka and RabbitMQ use local single-node charts with temporary storage. Kafka uses `kafka:9092`; RabbitMQ uses `rabbitmq:5672`, with management on port 15672.
+- SeaweedFS supplies S3-compatible storage at `http://seaweedfs-all-in-one:8333`. The applications use local credentials from `.env`; no AWS account is needed. Its data is lost when its pod is replaced.
+- Vault runs in development mode. It is a local secret store, not a production Vault installation.
+- PostgreSQL and Redis use persistent volumes.
+
+These tools are demo choices. A custom topology can select other charts or omit them.
+
+## Open the dashboards
+
+After a full demo sync, these default URLs are available:
+
+| Tool | URL | Purpose |
+| --- | --- | --- |
+| ArgoCD | [argocd.127.0.0.1.nip.io:8080](http://argocd.127.0.0.1.nip.io:8080) | Application status, sync operations, and resource details |
+| Dozzle | [dozzle.127.0.0.1.nip.io:8080](http://dozzle.127.0.0.1.nip.io:8080) | Pod logs |
+| Kafbat UI | [kafka-ui.127.0.0.1.nip.io:8080](http://kafka-ui.127.0.0.1.nip.io:8080) | Kafka topics and events |
+
+Adjust URLs if you change the domain or ingress port. A fresh focused demo excludes Dozzle and Kafbat UI.
+
+The ArgoCD username is `admin`. Retrieve its initial password with:
 
 ```bash
 .local/bin/kubectl --context k3d-control-plane-cluster -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 
-ArgoCD uses Helm to render application charts. Helm release listings show bootstrap releases such as ArgoCD and ESO; application workloads are managed through ArgoCD Applications.
+ArgoCD renders application charts with Helm and manages their resources. `helm list` shows bootstrap releases such as ArgoCD and External Secrets Operator, not each deployed application.
+
+Next: [initialize data](seeds.md) or [connect your application](services.md).

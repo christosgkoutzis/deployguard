@@ -1,6 +1,6 @@
-# Demo walkthrough
+# Test scenario
 
-The bundled demo shows an HTTP request moving through a database, message broker, worker, cache, search index, and CSV export. Use it to explore those connections or as an integration-test example.
+The bundled test scenario shows an HTTP request moving through a database, message broker, worker, cache, search index, and CSV export. Use it to explore those connections or as an integration-test example.
 
 Start with [Get started](get-started.md) to install, deploy, and run `e2e-tests`.
 
@@ -10,7 +10,7 @@ Start with [Get started](get-started.md) to install, deploy, and run `e2e-tests`
 - **Python backend** stores greetings in PostgreSQL and publishes their IDs to Kafka. Reads check Redis before PostgreSQL.
 - **Python worker** consumes Kafka events, asks the HTTP mock to validate them, marks greetings as Approved, and indexes them in Elasticsearch.
 - **Report worker** consumes RabbitMQ export tasks and uploads a CSV from PostgreSQL to SeaweedFS's S3-compatible endpoint.
-- **Vault and its seed** supply application settings. External Secrets Operator copies those settings into Kubernetes Secrets; the demo applications also support direct Vault reads.
+- **Vault and its seed** supply application settings. External Secrets Operator copies those settings into Kubernetes Secrets; the test scenario applications also support direct Vault reads.
 - **WireMock** returns fixed external API responses.
 - **Dozzle and Kafbat UI** show pod logs and Kafka topics.
 
@@ -114,7 +114,25 @@ docker logs deployguard-source-control-plane-cluster
 
 This Nginx container serves the generated Git repository to ArgoCD.
 
-## Remove the demo files
+## Pause and resume the cluster
+
+These commands use the default cluster name. To stop its nodes:
+
+```bash
+.local/bin/k3d cluster stop control-plane-cluster
+```
+
+To start them again:
+
+```bash
+.local/bin/k3d cluster start control-plane-cluster
+```
+
+Start a stopped cluster before using DeployGuard; `setup` retains an existing cluster without starting it. The separate Nginx source container stays running when the cluster stops.
+
+Stopping is not a backup. PostgreSQL and Redis volumes survive pod replacement, but deleting the cluster removes its local data. Kafka and SeaweedFS lose temporary data when their pods are replaced; RabbitMQ has no persistent volume. Vault development mode loses its secrets when its process restarts. Completed seeds do not automatically rerun just because a dependency restarted, so a restart can require data initialization before the scenario works again.
+
+## Remove the test scenario files
 
 Use this when preparing a checkout for your own application:
 
@@ -122,7 +140,7 @@ Use this when preparing a checkout for your own application:
 ./scripts/deployguard clear-scenario
 ```
 
-The command moves the known demo directories into a backup under `.local/state/scenario-backups/` and prints that location. It includes `services/python-backend`, `services/python-worker`, `services/report-worker`, `services/ruby-gateway`, `tests/e2e-tests`, `mocks/external-api-mock`, `seeds/vault-seeder`, and the two local dependency charts.
+The command moves the known test scenario directories into a backup under `.local/state/scenario-backups/` and prints that location. It includes `services/python-backend`, `services/python-worker`, `services/report-worker`, `services/ruby-gateway`, `tests/e2e-tests`, `mocks/external-api-mock`, `seeds/vault-seeder`, and the two local dependency charts.
 
 Edits inside those directories move with them. Other files, including custom application directories, shared charts, and tool tests, stay in place.
 
@@ -132,4 +150,4 @@ To retain the local Kafka and RabbitMQ charts, use this alternative:
 ./scripts/deployguard clear-scenario --skip-dependencies
 ```
 
-The command leaves the running cluster and `deployguard.yaml` unchanged. Replace the demo topology before the next validation or sync. To restore files, copy them from the printed backup directory to their original paths, taking care not to overwrite newer edits. Removing files does not prune cluster resources.
+The command leaves the running cluster and `deployguard.yaml` unchanged. Replace the test scenario topology before the next validation or sync. To restore files, copy them from the printed backup directory to their original paths, taking care not to overwrite newer edits. Removing files does not prune cluster resources.

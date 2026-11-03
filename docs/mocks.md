@@ -1,60 +1,34 @@
 # Mock an HTTP API
 
-Use a WireMock mock when your application needs a predictable HTTP response instead of a real external API. For example, a greeting API can return the same JSON on every test run.
+The test scenario uses WireMock instead of a real external API. Its files are in [mocks/external-api-mock](../mocks/external-api-mock):
 
-Start with the [small API example](services.md#run-a-small-api), including its Python file and Dockerfile.
+| File | Request | Response |
+| --- | --- | --- |
+| [greeting.json](../mocks/external-api-mock/greeting.json) | `GET /api/greeting` | A greeting containing `Hello from the mocked API!` |
+| [validate.json](../mocks/external-api-mock/validate.json) | `POST /api/validate` | `{"result":"Approved"}` |
 
-## Add a response
+The backend requests the greeting. The Kafka worker calls the validation endpoint before approving an event.
 
-Save `my-app/mocks/sample-mock/greeting.json`:
+## Request the mock
 
-```json
-{
-  "request": {"method": "GET", "url": "/api/greeting"},
-  "response": {
-    "status": 200,
-    "jsonBody": {"message": "Hello from sample-mock"}
-  }
-}
-```
-
-Replace `my-app/deployguard.yaml` with:
-
-```yaml
-name: deployguard
-mocks:
-  - sample-mock
-services:
-  - name: sample-api
-    build_path: api
-    depends_on: [sample-mock]
-    env:
-      - GREETING_URL=http://sample-mock-service:80/api/greeting
-```
+After [setup and bootstrap](get-started.md), deploy the backend and its prerequisites:
 
 ```bash
-./scripts/deployguard validate --topology my-app/deployguard.yaml
-./scripts/deployguard sync --topology my-app/deployguard.yaml --focus sample-api
-curl --fail http://sample-api.127.0.0.1.nip.io:8080/greeting
+./scripts/deployguard sync --focus python-backend
+curl --fail http://external-api-mock.127.0.0.1.nip.io:8080/api/greeting
+curl --fail http://python-backend.127.0.0.1.nip.io:8080/mock-greeting
 ```
 
-The API calls the mock and returns:
+Both requests return the mocked greeting. Inside the cluster, the mock is available at `external-api-mock-service:80`.
 
-```json
-{
-  "message": "Hello from sample-api",
-  "external": {"message": "Hello from sample-mock"}
-}
-```
+## Configure mappings
 
-`depends_on` ensures that focusing on the API also deploys its mock. Other pods use `sample-mock-service:80`. You can also request the mock directly at `http://sample-mock.127.0.0.1.nip.io:8080/api/greeting` with the default host settings.
+The topology lists `external-api-mock` under `mocks`. Services that need it declare it in `depends_on` so focused deployments include it.
 
-## Change a response
+Each mock needs at least one JSON mapping in `mocks/<name>/`, relative to the topology file. A mapping contains `request` and `response` objects, as the linked files show. WireMock checks the detailed mapping rules when it starts.
 
-Edit `greeting.json` and run the same sync command again. A mapping change restarts WireMock so it loads the new response. An unchanged mapping keeps the current pod.
+After editing a mapping, sync again. Changed mappings restart WireMock; unchanged mappings retain its pod. The scenario's tests expect the committed responses, so restore them before rerunning that suite.
 
-Each mock needs at least one JSON mapping in `mocks/<name>/`, relative to the topology file. Each file must contain `request` and `response` objects. WireMock checks the detailed mapping rules when it starts.
+Mappings are stored in a ConfigMap. Keep them small; nested response-file directories are not supported by the built-in chart.
 
-Mappings are stored in a Kubernetes ConfigMap. Keep them small; nested response-file directories are not supported by the built-in chart.
-
-WireMock handles HTTP, including REST and SOAP. It does not replace a database or a message broker. Use [dependency charts](dependencies.md) for those protocols.
+WireMock handles HTTP, including REST and SOAP. Use [dependency charts](dependencies.md) for databases or message brokers.

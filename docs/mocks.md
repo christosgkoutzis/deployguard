@@ -1,41 +1,34 @@
-# Mock Services
+# Mock an HTTP API
 
-DeployGuard supports local HTTP API mocks through WireMock. Mocks are graph entities managed by ArgoCD.
+The test scenario uses WireMock instead of a real external API. Its files are in [mocks/external-api-mock](../mocks/external-api-mock):
 
-## Supported Technology Scope
+| File | Request | Response |
+| --- | --- | --- |
+| [greeting.json](../mocks/external-api-mock/greeting.json) | `GET /api/greeting` | A greeting containing `Hello from the mocked API!` |
+| [validate.json](../mocks/external-api-mock/validate.json) | `POST /api/validate` | `{"result":"Approved"}` |
 
-1. WireMock simulates HTTP APIs, including REST and SOAP requests.
-2. Database, broker, and binary protocols need real dependencies or a purpose-built tool.
-3. Built-in ingress exposes HTTP; topology fields do not configure TLS.
+The backend requests the greeting. The Kafka worker calls the validation endpoint before approving an event.
 
-## Required Mock Location & Files
+## Request the mock
 
-Put at least one JSON mapping in `mocks/<name>/`, relative to the topology. Names must be unique lowercase DNS labels of at most 40 characters. Each mapping object must contain `request` and `response`; WireMock checks its detailed mapping semantics at runtime.
+After [setup and bootstrap](get-started.md), deploy the backend and its prerequisites:
 
-```json
-{
-  "request": {"method": "GET", "url": "/api/greeting"},
-  "response": {
-    "status": 200,
-    "jsonBody": {"message": "Hello from the mocked API!"}
-  }
-}
+```bash
+./scripts/deployguard sync --focus python-backend
+curl --fail http://external-api-mock.127.0.0.1.nip.io:8080/api/greeting
+curl --fail http://python-backend.127.0.0.1.nip.io:8080/mock-greeting
 ```
 
-Mappings are mounted from a ConfigMap. Keep the combined content within Kubernetes ConfigMap limits. Nested fixture directories and large file-backed responses are not supported by the built-in chart.
+Both requests return the mocked greeting. Inside the cluster, the mock is available at `external-api-mock-service:80`.
 
-## Declarative Configuration
+## Configure mappings
 
-```yaml
-mocks:
-  - external-api-mock
-services:
-  - name: sample-api
-    depends_on: [external-api-mock]
-    env:
-      - EXTERNAL_API_URL=http://external-api-mock-service:80
-```
+The topology lists `external-api-mock` under `mocks`. Services that need it declare it in `depends_on` so focused deployments include it.
 
-A declared mock is selected in full syncs. Add it to `depends_on` when a service or test also needs it in focus mode. The chart mounts mappings, exposes `<name>-service:80`, and creates ingress at `<name>.<CLUSTER_DOMAIN>`. Verification checks rollout and WireMock's `/__admin/` endpoint.
+Each mock needs at least one JSON mapping in `mocks/<name>/`, relative to the topology file. A mapping contains `request` and `response` objects, as the linked files show. WireMock checks the detailed mapping rules when it starts.
 
-Edit mappings and sync again. Changed mappings trigger a WireMock rollout so the running server loads them; unchanged mappings keep the current pod. No separate scaffolding command is needed.
+After editing a mapping, sync again. Changed mappings restart WireMock; unchanged mappings retain its pod. The scenario's tests expect the committed responses, so restore them before rerunning that suite.
+
+Mappings are stored in a ConfigMap. Keep them small; nested response-file directories are not supported by the built-in chart.
+
+WireMock handles HTTP, including REST and SOAP. Use [dependency charts](dependencies.md) for databases or message brokers.

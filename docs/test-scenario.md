@@ -1,117 +1,153 @@
-# The DeployGuard Test Scenario
+# Test scenario
 
-DeployGuard includes a local demo of services communicating through HTTP, events, and queued tasks. It validates the platform and provides a reference topology; its technologies do not constrain your own applications.
+The bundled test scenario shows an HTTP request moving through a database, message broker, worker, cache, search index, and CSV export. Use it to explore those connections or as an integration-test example.
 
-## Architecture
+Start with [Get started](get-started.md) to install, deploy, and run `e2e-tests`.
 
-The demo connects these applications and dependencies:
+## What runs
 
-1. **Ruby Gateway** calls **Python Backend**.
-2. **Python Backend** reads **Redis**, falling back to **PostgreSQL** on a cache miss.
-3. Writes enter **PostgreSQL** and publish an event to **Kafka**.
-4. **HashiCorp Vault** holds application credentials, with environment variables as a fallback.
-5. **Python Worker** consumes Kafka events, validates through **External API Mock**, updates PostgreSQL, and indexes into **Elasticsearch**.
-6. **Report Worker** consumes export tasks from **RabbitMQ**, queries PostgreSQL, and uploads CSV reports to **SeaweedFS**.
-7. **Kafbat UI** and **Dozzle** provide topic/event and pod-log interfaces.
+- **Ruby gateway** calls the Python backend over HTTP and displays its responses.
+- **Python backend** stores greetings in PostgreSQL and publishes their IDs to Kafka. Reads check Redis before PostgreSQL.
+- **Python worker** consumes Kafka events, asks the HTTP mock to validate them, marks greetings as Approved, and indexes them in Elasticsearch.
+- **Report worker** consumes RabbitMQ export tasks and uploads a CSV from PostgreSQL to SeaweedFS's S3-compatible endpoint.
+- **Vault and its seed** supply application settings. External Secrets Operator copies those settings into Kubernetes Secrets; the test scenario applications also support direct Vault reads.
+- **WireMock** returns fixed external API responses.
+- **Dozzle and Kafbat UI** show pod logs and Kafka topics.
 
-The topology declares prerequisites: Vault starts before its seeder, then the SecretStore, then service credentials and initialization. Workers depend on backend initialization. Tests require both workers and the mock.
+The topology orders these prerequisites. For example, Vault is seeded before application secrets are read, backend initialization runs before its Deployment, and the integration suite depends on both workers.
 
-## Validating Service-to-Service Communication
+## Use the gateway
 
-After the [setup workflow](get-started.md), open the gateway or request it:
+Open [ruby-gateway.127.0.0.1.nip.io:8080](http://ruby-gateway.127.0.0.1.nip.io:8080/) after deployment. Use your configured domain and ingress port if you changed the defaults.
 
-```bash
-curl http://ruby-gateway.127.0.0.1.nip.io:8080/
-```
+1. The page shows greetings from the backend and the mocked API.
+2. Enter a unique greeting and press **Write Custom Event**. The backend stores it and publishes a Kafka event.
+3. Press **Read Latest Greeting** after the worker has processed it. Its status becomes **Approved**. Repeated reads within the cache lifetime show **Redis Cache** as the source.
+4. Search for the greeting. After indexing, the gateway lists the matching record's ID and status.
+5. Press **1. Generate CSV Report (Async)**. The report worker processes the queued task and uploads the report.
 
-Use your configured domain and ingress port when changing defaults.
+Processing and indexing happen asynchronously. An HTTP response or a ready pod does not mean that those steps have finished. A cached greeting can remain visible for up to 15 seconds.
 
-### Expected UI Behavior
+## Retrieve a CSV report
 
-1. **Sync Fetch:** The page includes both the Python backend response and mocked greeting.
-2. **Custom Write:** Submit a greeting to write PostgreSQL and publish to Kafka.
-3. **Async Validation:** The Python Worker validates the event through the mock, updates its status to Approved, and indexes it in Elasticsearch.
-4. **Cached Read:** Reading the latest greeting checks Redis before PostgreSQL.
-5. **Full-Text Search:** Search returns Elasticsearch results for the greeting.
-6. **CSV Export:** Generate a report through RabbitMQ and the Report Worker, then obtain its S3 presigned download URL.
+**Download Latest CSV** redirects to a signed S3 URL at `http://seaweedfs-all-in-one:8333`. That hostname is reachable inside Kubernetes, not directly from your host browser. The integration suite downloads and checks the CSV from inside the cluster.
 
-The demo's S3 endpoint is `http://seaweedfs-all-in-one:8333`, which is reachable inside the cluster. Its presigned download link therefore also uses this internal hostname. The E2E suite downloads and validates the CSV inside Kubernetes. Host-browser access to that URL requires routing the signed hostname and port to SeaweedFS; ingress access to the gateway alone does not make the S3 URL host-accessible. Preserve the signed host rather than rewriting the URL.
-
-## Acceptance Criteria
-
-1. Sync completes without deployment, initialization, or health failures.
-2. Verify succeeds using the recorded inventory, without sourcing topology output variables.
-3. Selected Applications show the requested revision as Synced and Healthy; registered test Jobs may be Suspended.
-4. The gateway displays both backend and mock responses.
-5. The E2E Job verifies that its written greeting is approved, cached, indexed, and present in a CSV downloaded through a signed S3 URL. Unsigned object downloads must be denied.
-6. Repeated sync and explicit test execution also succeed.
+For a copy on your machine, first run the suite so the report is generated and checked:
 
 ```bash
-./scripts/deployguard sync
-./scripts/deployguard verify
 ./scripts/deployguard test e2e-tests
 ```
 
-A fresh `--focus e2e-tests` selects the full request-chain prerequisites while leaving Dozzle and Kafbat out. CI first verifies and tests that focused environment, then expands to the full topology on the same cluster only after the focused checks pass. Full deployment includes Dozzle and Kafbat. Focus switching retains previously selected applications unless pruning is requested.
-
-## Inspecting the Local Environment
-
-Run these examples from the repository root after installation. They use the checkout-local tools and target the default cluster explicitly. Change the context, namespace, and names for a separate environment.
-
-### ⚙️ Cluster Management
+Then download through the backend container, which can resolve the storage hostname:
 
 ```bash
-.local/bin/k3d cluster stop control-plane-cluster
-.local/bin/k3d cluster start control-plane-cluster
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard exec deployment/python-backend-workload -- python -c '
+import json
+import sys
+from urllib.request import urlopen
+
+with urlopen("http://127.0.0.1:8000/report/download", timeout=10) as response:
+    url = json.load(response)["download_url"]
+with urlopen(url, timeout=10) as response:
+    sys.stdout.buffer.write(response.read())
+' > /tmp/deployguard-report.csv
 ```
 
-Deleting a cluster removes its local environment. Use `.local/bin/k3d cluster delete <name>` only when intentionally resetting that specific cluster.
+Open `/tmp/deployguard-report.csv` in your editor. The command preserves the signed URL's hostname and streams the file to your machine. Changing the hostname in a presigned URL invalidates its signature.
 
-### 📦 Kubernetes & Pods
+## What the suite proves
+
+`e2e-tests` checks four flows: backend and mock responses, approval of its own written greeting and a cached read, search indexing, and a signed CSV containing that same greeting. It also checks that unsigned object downloads are denied.
+
+Deployment verification covers readiness and initialization separately. On a fresh cluster, `sync --focus e2e-tests` includes this request chain but excludes Dozzle and Kafbat UI. Full sync adds those tools. Switching focus retains other deployed applications unless `--prune` is requested.
+
+## Inspect the environment
+
+Run these commands from the repository root. They use the installed tools and default context and namespace.
+
+### Pods and application status
 
 ```bash
 .local/bin/kubectl --context k3d-control-plane-cluster -n deployguard get pods
-.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard logs -f -l app=python-backend
-POD_NAME=replace-with-a-pod-name
-.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard describe pod "$POD_NAME"
-.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard exec -it "$POD_NAME" -- /bin/sh
-```
-
-Use sync for source changes; Skaffold rebuilds the affected image and ArgoCD deploys its new reference.
-
-### 🔌 Database & Broker Access
-
-```bash
-.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/postgres 5432:5432
-.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/redis-master 6379:6379
-.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward svc/rabbitmq 5672:5672
-```
-
-These commands run until stopped and expose the selected database or broker locally.
-
-### ☸️ Helm & GitOps
-
-```bash
 .local/bin/kubectl --context k3d-control-plane-cluster -n argocd get applications
-.local/bin/helm --kube-context k3d-control-plane-cluster list -n argocd
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard describe deployment/python-backend-workload
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard logs deployment/python-backend-workload --tail=100
 ```
 
-Helm lists bootstrap releases; ArgoCD renders and reconciles application charts. Use its dashboard for per-application events and initialization-hook failures.
+To open a shell in the backend:
 
-### 🐳 Docker Source Server
+```bash
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard exec -it deployment/python-backend-workload -- /bin/sh
+```
+
+Use `sync` after source edits. Editing a running container is not a persistent source change.
+
+### Databases and queues
+
+Each port-forward command keeps running until stopped. Choose one and use a separate terminal for your database client.
+
+PostgreSQL on localhost port 15432:
+
+```bash
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward service/postgres 15432:5432
+```
+
+Redis on localhost port 16379:
+
+```bash
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward service/redis-master 16379:6379
+```
+
+RabbitMQ's AMQP endpoint on localhost port 15673:
+
+```bash
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard port-forward service/rabbitmq 15673:5672
+```
+
+Clients still need the credentials configured in `.env`. See [dependencies](dependencies.md#open-the-dashboards) for dashboard URLs and the ArgoCD login.
+
+### Local Git server
 
 ```bash
 docker logs deployguard-source-control-plane-cluster
 ```
 
-The container serves the separate generated Git repository used by ArgoCD.
+This Nginx container serves the generated Git repository to ArgoCD.
 
-## Clearing the Test Scenario
+## Pause and resume the cluster
+
+These commands use the default cluster name. To stop its nodes:
+
+```bash
+.local/bin/k3d cluster stop control-plane-cluster
+```
+
+To start them again:
+
+```bash
+.local/bin/k3d cluster start control-plane-cluster
+```
+
+Start a stopped cluster before using DeployGuard; `setup` retains an existing cluster without starting it. The separate Nginx source container stays running when the cluster stops.
+
+Stopping is not a backup. PostgreSQL and Redis volumes survive pod replacement, but deleting the cluster removes its local data. Kafka and SeaweedFS lose temporary data when their pods are replaced; RabbitMQ has no persistent volume. Vault development mode loses its secrets when its process restarts. Completed seeds do not automatically rerun just because a dependency restarted, so a restart can require data initialization before the scenario works again.
+
+## Remove the test scenario files
+
+Use this when preparing a checkout for your own application:
 
 ```bash
 ./scripts/deployguard clear-scenario
-# Keep the local Kafka and RabbitMQ charts
+```
+
+The command moves the known test scenario directories into a backup under `.local/state/scenario-backups/` and prints that location. It includes `services/python-backend`, `services/python-worker`, `services/report-worker`, `services/ruby-gateway`, `tests/e2e-tests`, `mocks/external-api-mock`, `seeds/vault-seeder`, and the two local dependency charts.
+
+Edits inside those directories move with them. Other files, including custom application directories, shared charts, and tool tests, stay in place.
+
+To retain the local Kafka and RabbitMQ charts, use this alternative:
+
+```bash
 ./scripts/deployguard clear-scenario --skip-dependencies
 ```
 
-The command moves only known demo assets into `.local/state/scenario-backups/<id>/`. Custom application files, generic charts, tool tests, and running cluster resources are retained. Restore files from that backup if needed. The demo topology remains: replace it before the next validation or sync. Clearing files does not prune existing cluster resources.
+The command leaves the running cluster and `deployguard.yaml` unchanged. Replace the test scenario topology before the next validation or sync. To restore files, copy them from the printed backup directory to their original paths, taking care not to overwrite newer edits. Removing files does not prune cluster resources.

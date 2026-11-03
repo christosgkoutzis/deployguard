@@ -10,65 +10,67 @@
     <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="python">
 </p>
 
-## Purpose
+DeployGuard builds and runs services and their dependencies on your machine. For example, you can test an API that writes to a database, sends a message to a worker, and calls a mocked HTTP API.
 
-DeployGuard builds and runs local environments containing application services, dependencies, mocks, seeds, and integration tests. Use it to test interactions between services and explore Kubernetes deployment, GitOps reconciliation, initialization, and secrets management.
+A **topology** is a YAML file describing the services, dependencies, configuration, and startup relationships of an environment. The included topology is `deployguard.yaml`. Run `sync` to build and deploy it, then run a test suite inside the cluster. You supply the application source, Dockerfiles, configuration, and test data.
 
-A declarative `deployguard.yaml` describes the environment. DeployGuard combines k3d, Skaffold, Helm, and ArgoCD into a standalone workflow: build images, deploy a recorded configuration, check readiness, and explicitly run tests.
+## What it does
 
-## Scope
+- Builds local application images with Skaffold and loads them into a k3d cluster.
+- Deploys services, workers, databases, HTTP mocks, and initialization Jobs in the order declared by `depends_on`.
+- Uses Helm charts for Kubernetes resources and ArgoCD to keep them matched to the deployed configuration.
+- Selects a service or test and its prerequisites with `--focus`. Other deployed applications stay until you explicitly request `--prune`.
+- Supplies Kubernetes Secrets directly, with optional Vault and External Secrets Operator support.
+- Runs tests as Kubernetes Jobs. The test command fails if its Job fails, disappears, or times out.
 
-Start with the bundled scenario or prepare your own compatible application images, dependency charts, configuration, and test data. DeployGuard coordinates these inputs; it does not discover an application's dependencies or configure its authentication and data automatically. Keep the topology and supporting files updated as your applications change.
+**GitOps** means keeping running resources matched to configuration recorded in Git. DeployGuard generates that configuration in a separate local Git repository served by Nginx; ArgoCD applies it. Your application repository is not committed or pushed.
 
-The built-in application charts support single-container web services, workers, and test Jobs. Other workload shapes need custom dependency charts. See [Services & Workers](docs/services.md) for build requirements and limits.
+## Run the included test scenario
 
-Source changes require an explicit sync. File watching, live source synchronization, and debugger orchestration are outside this workflow. The lab targets local testing and experimentation rather than production operation.
+You need Docker running and Python 3.11 or newer. Check the [prerequisites and installation guide](docs/get-started.md) before starting.
 
-## Features
-
-- **Declarative Topology:** Validate entity names, build paths, secret references, and the complete dependency graph before deployment.
-- **Skaffold Builds:** Build selected local Docker contexts, reuse its build cache, and deploy the resulting image references through k3d.
-- **GitOps via ArgoCD:** Generate a separate local Git repository and serve immutable snapshots through Nginx. ArgoCD owns workload deployment and dependency ordering.
-- **Dependency Graph & Focus Mode:** Use `--focus <entity>` to select its prerequisites. Existing unselected applications remain until you explicitly request `--prune`.
-- **Mocks, Seeds & Secrets:** Use WireMock, explicit initialization Jobs, Kubernetes Secret references, and optional Vault bindings through External Secrets Operator.
-- **Integrated Test Runner:** Register suspended test Jobs and execute them explicitly, with live logs and authoritative Kubernetes Job results.
-
-## Usage
-
-👉 **[Read the Full Get Started Guide](docs/get-started.md)**
-
-From the repository root, prepare the local tooling:
+From the repository root:
 
 ```bash
 ./scripts/deployguard install
 ```
 
-Set your credentials in `.env`, define your topology, and run:
+Installation creates `.env`. Review its local credentials, then run:
 
-1. Define and validate your topology with `./scripts/deployguard validate`.
-2. Run `./scripts/deployguard setup` to create the local k3d cluster.
-3. Run `./scripts/deployguard bootstrap` to install ArgoCD and any required secret operator.
-4. Run `./scripts/deployguard sync` to build, deploy, and verify the selected environment.
-5. Run `./scripts/deployguard test <test-name>` to execute an integration suite.
+```bash
+./scripts/deployguard validate
+./scripts/deployguard setup
+./scripts/deployguard bootstrap
+./scripts/deployguard sync
+./scripts/deployguard test e2e-tests
+```
 
-## Demo / Test Scenario
+Open [the gateway](http://ruby-gateway.127.0.0.1.nip.io:8080/). Write a greeting, read its approval status, search for it, and generate a CSV report. See the [test scenario](docs/test-scenario.md), including how to retrieve the report from inside the cluster.
 
-DeployGuard includes a local demo with a gateway, backend, workers, databases, messaging, mocks, and integration tests.
+The full test scenario includes PostgreSQL, Redis, Kafka, RabbitMQ, Elasticsearch, Vault, and S3-compatible storage. It also includes a Kafka UI and a pod log viewer. These components need Docker memory and disk; they are not all required by custom topologies.
 
-👉 **[Explore the Test Scenario](docs/test-scenario.md)**
+## Where it fits
 
-The demo is an example topology. It does not define which technologies your own services must use. To start your own topology, `./scripts/deployguard clear-scenario` moves known demo assets into a recoverable backup; replace `deployguard.yaml` before syncing again.
+Use DeployGuard for prepared integration environments and for learning how Kubernetes, Helm, ArgoCD, initialization, and secrets work together.
 
-## Documentation (Entities)
+Code changes need another `sync`. There is no file watcher, live source synchronization, or debugger setup. Built-in application charts support single-container web services, workers, and test Jobs. Other Kubernetes shapes need a dependency chart.
 
-- 📦 **[Services & Workers](docs/services.md)**: Application eligibility, custom paths, environment variables, and secret bindings.
-- 🐘 **[Dependencies](docs/dependencies.md)**: Remote Helm charts, local charts, and observability tools.
-- 🤡 **[Mock Services](docs/mocks.md)**: WireMock mappings and dependency declarations.
-- 🌱 **[Seeds](docs/seeds.md)**: Platform initialization and service migrations.
-- 🧪 **[Tests](docs/tests.md)**: Verification, explicit test execution, and CI coverage.
+DeployGuard runs locally. It does not discover dependencies, import Compose files, or configure an application's authentication and data for you.
 
-CI checks the documented behavior, the full demo, focused deployment, and a separate generic fixture. A passing run establishes that those checks passed on the tested toolchain; it cannot guarantee every possible application or host configuration.
+## Guides
+
+| Task | Guide |
+| --- | --- |
+| Install tools and run the test scenario | [Get started](docs/get-started.md) |
+| Understand and use the test scenario | [Test scenario](docs/test-scenario.md) |
+| Run your own API or worker | [Services](docs/services.md) |
+| Add a database or Helm chart | [Dependencies](docs/dependencies.md) |
+| Replace an HTTP API with a mock | [Mocks](docs/mocks.md) |
+| Initialize shared data or run migrations | [Initialization](docs/seeds.md) |
+| Write tests and understand CI | [Tests](docs/tests.md) |
+
+CI runs static and unit checks, the test scenario's integration tests, and deployment lifecycle checks on a separate sample environment. Coverage and platform limits are described in the tests guide.
 
 ## License
 
-This project is under the [MIT License](LICENSE).
+[MIT](LICENSE).

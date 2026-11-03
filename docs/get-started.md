@@ -1,173 +1,198 @@
-# Get Started
+# Get started
 
-This guide installs the local GitOps lab and runs an environment from a topology file: a YAML description of its services, dependencies, mocks, seeds, and tests. Commands below use the bundled demo to explore deployment and integration testing.
+This guide runs the bundled test scenario. Its **topology**, `deployguard.yaml`, describes the environment and its dependencies. Keep that file unchanged for this walkthrough.
 
-## Prerequisites
+## Before you start
 
-1. Docker with a running daemon, Git, Bash, curl, tar, and Python 3.11 or newer with venv/pip support.
-2. Internet access for tool, chart, package, and image downloads. Local ingress names must resolve to localhost; the default domain uses `nip.io`.
-3. Available ports for Kubernetes, HTTP ingress, and the generated Git source.
-4. Enough Docker memory and disk for your topology. The full demo includes Elasticsearch, Kafka, and several databases; focus excludes unrelated tools but retains every declared prerequisite.
+You need:
 
-CI runs on Linux amd64. Tool installation supports Linux/macOS on amd64/arm64; upstream dependency images must also support your architecture. CI does not verify macOS or arm64 compatibility.
+- Docker with a running daemon.
+- Git, Bash, curl, tar, and Python 3.11 or newer with venv and pip support.
+- Internet access to download tools, charts, packages, and images.
+- Free localhost ports 6443, 8080, and 8081.
+- Docker memory and disk for the selected services. The full test scenario runs Elasticsearch, Kafka, several databases, and their management tools. Resource needs depend on the selected images and their configuration.
 
-## 1. Prepare Python and Tooling
+The installer supports Linux and macOS on amd64 and arm64. CI tests Linux amd64; macOS and arm64 are not covered, and dependency images must support your architecture.
 
-From the repository root:
+The default hostnames use `nip.io` to resolve to `127.0.0.1`. Your DNS configuration must allow those lookups.
+
+## 1. Install
+
+Run commands from the repository root:
 
 ```bash
 ./scripts/deployguard install
 ```
 
-Install creates the local Python environment, installs the dependencies and pinned tools, and creates `.env` from `.env.example` when missing. Set your credentials and environment configuration in `.env` before continuing. Repeating install updates local dependencies and tools while preserving `.env` and cluster resources.
+This installs Python dependencies and pinned tools under `.local` and creates `.env` from `.env.example` if needed. It preserves an existing `.env`, system tools, and shell settings. Repeating install refreshes the checkout's dependencies and tools.
 
-The example credentials belong to the local demo dependencies. No AWS account or external Vault service is required.
-
-Use `./scripts/deployguard` for every command. It handles executable paths, temporary files, and caches inside `.local`; no shell activation or exports are needed. Installation does not change system-wide tools or shell settings. Python, Docker, Git, Bash, curl, and tar must already be available. Commands such as setup and sync require installation and do not install dependencies automatically.
-
-Versions and Python dependencies are declared in `pyproject.toml`. To select a Python executable, use `DEPLOYGUARD_PYTHON=/path/to/python ./scripts/deployguard install`. Python 3.11 or newer is required.
-
-## 2. Define and Validate Environment Topology
-
-For the bundled demo, leave `deployguard.yaml` unchanged and continue with validation below. To run your own application, prepare its build context, configuration, dependencies, and test data using the [service requirements](services.md). Declare each required process as a service or worker and describe its prerequisites explicitly; DeployGuard does not import Compose files or process definitions.
-
-Replace `deployguard.yaml` or choose another topology with `--topology`. The following example requires your own source folder and Dockerfile:
-
-```yaml
-apiVersion: deployguard/v1
-name: my-local-env
-services:
-  - name: sample-api
-    build_path: ./apps/sample-api
-    port: 3000
-    health_endpoint: /ready
-    env:
-      - APP_MODE=development
-```
-
-The build context must contain a Dockerfile. The application must listen on `0.0.0.0:3000` and return a successful response at `/ready`.
+Review `.env` in your editor. Its credentials are for local dependencies: no AWS account or external Vault service is needed. Choose your local passwords before deploying.
 
 ```bash
 ./scripts/deployguard validate
 ./scripts/deployguard doctor
 ```
 
-Validation reads configuration and files without building or contacting Kubernetes. It rejects unknown fields, duplicate entities, missing prerequisites, dependency cycles, missing build contexts, invalid mappings, and invalid secret references. The format is defined by `platform/config/topology.schema.json`. The optional apiVersion defaults to deployguard/v1; name defaults to deployguard.
+`validate` checks the topology and referenced local files. `doctor` checks that required executables are available and prints the configured tool versions. It does not test Docker daemon health or available memory.
 
-Use `--topology path/to/topology.yaml` or `TOPOLOGY_FILE` to choose another topology. Build paths, chart paths, seed directories, and mock locations resolve relative to that file's directory. A service's env_file resolves inside its build context.
+Use `./scripts/deployguard` for application commands; it finds the checkout's tools without shell activation or exports. To choose a Python interpreter during installation, set `DEPLOYGUARD_PYTHON` to its executable path.
 
-## 3. Create the Local Cluster
+## 2. Create and bootstrap the cluster
 
 ```bash
 ./scripts/deployguard setup
-```
-
-This creates a pinned k3s cluster with one server and two agents. An existing cluster with the configured name is retained. Kubernetes and Helm commands target `k3d-${CLUSTER_NAME}` explicitly, and creation does not switch the current kubectl context.
-
-Configuration comes from the repository .env, with process environment variables taking precedence:
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| CLUSTER_NAME | control-plane-cluster | k3d cluster identity |
-| NAMESPACE | deployguard | Application namespace |
-| ARGO_APP_NAMESPACE | argocd | ArgoCD and Application namespace |
-| CLUSTER_DOMAIN | 127.0.0.1.nip.io | Ingress hostname suffix |
-| API_PORT | 6443 | Kubernetes API on localhost |
-| INGRESS_PORT | 8080 | HTTP ingress on localhost |
-| SOURCE_PORT | 8081 | Generated Git source on localhost |
-| TIMEOUT_SECONDS | 600 | Default timeout for each readiness or initialization wait |
-
-DeployGuard rejects conflicting Applications or bootstrap Secrets that it does not own. Use a separate checkout and cluster name for an independent environment.
-
-## 4. Bootstrap Platform
-
-```bash
 ./scripts/deployguard bootstrap
 ```
 
-Bootstrap creates namespaces, installs the pinned ArgoCD chart, and creates the topology's AppProject. External Secrets Operator is installed only when the topology declares secret_stores. Bootstrap uses Helm; application workloads are subsequently reconciled by ArgoCD. ArgoCD’s internal Redis uses the official Docker Hub image, pinned by digest in `platform/config/argocd-values.yaml`.
+`setup` creates a k3s cluster in Docker through k3d, with one server and two agents. An existing cluster with the configured name is retained. The command does not switch your current kubectl context.
 
-## 5. Deploy and Test
+`bootstrap` installs ArgoCD, which applies the generated Kubernetes configuration. It also installs External Secrets Operator (ESO) when the topology declares Vault stores.
+
+## 3. Deploy and test
 
 ```bash
 ./scripts/deployguard sync
 ./scripts/deployguard test e2e-tests
 ```
 
-Sync builds and verifies the complete environment. The test command then runs the bundled integration suite. Deployment verification alone does not test application request flows. For your own topology, use its declared test name.
+`sync` builds the application images, loads them into k3d, deploys the topology, runs initialization, and waits for readiness. A successful sync ends with `Environment synced and verified`.
 
-Use `./scripts/deployguard verify` later to recheck deployment health without rebuilding. Source changes require another sync; DeployGuard does not watch files or synchronize edits into running containers.
+`test` then runs the test scenario's four integration checks. It verifies HTTP responses, event processing, cache reads, search results, and a signed CSV download. Success ends with `e2e-tests Job completed`.
 
-### Selecting Part of the Environment
+Open [the gateway](http://ruby-gateway.127.0.0.1.nip.io:8080/) and follow the [test scenario](test-scenario.md). The gateway's CSV download URL is internal to the cluster; that guide includes a command to retrieve the file.
 
-Focus selects one entity and every prerequisite. For the demo test suite:
+## 4. Change code and deploy again
+
+After editing a service, run:
+
+```bash
+./scripts/deployguard sync
+./scripts/deployguard test e2e-tests
+```
+
+Builds reuse Skaffold's cache. DeployGuard does not watch files or copy edits into running containers.
+
+To check deployment readiness later without rebuilding:
+
+```bash
+./scripts/deployguard verify
+```
+
+Readiness is separate from application testing. A worker can be running without successfully processing messages; the integration suite checks that behavior.
+
+## Deploy only a service or test and its prerequisites
+
+For the included suite:
 
 ```bash
 ./scripts/deployguard sync --focus e2e-tests
+./scripts/deployguard test e2e-tests
 ```
 
-For your own topology, replace `e2e-tests` with the entity you want to select. Unselected applications keep their deployed versions and do not block selected health checks.
+On a fresh cluster this excludes Dozzle and Kafbat UI, while retaining all dependencies needed by the test. On an existing cluster, unselected applications remain at their deployed versions and do not block the selected checks.
 
-To also remove unselected applications and the resources they manage, explicitly request pruning:
+To remove unselected applications and their managed resources as well:
 
 ```bash
 ./scripts/deployguard sync --focus e2e-tests --prune
 ```
 
-ArgoCD keeps deployment resources matched to the deployed configuration. Manual changes made with kubectl or the Kubernetes dashboard can be overwritten; edit your source or topology and sync to make a lasting change. Test Applications synchronize requested revisions with automatic retries and self-healing disabled; use the test command to start another execution. ArgoCD also deletes managed resources removed from an application's chart or configuration after sync. This happens without `--prune`; that flag controls removal of whole unselected applications.
+ArgoCD also removes resources deleted from a selected application's chart. That is separate from `--prune`, which removes whole unselected applications. Manual changes to managed resources can be overwritten; edit the source or topology and sync to keep a change.
 
-Builds reuse Skaffold's cache. Service initialization runs on deployment syncs; platform seeds run when their inputs change. Tests run only through `./scripts/deployguard test <name>`. Run `./scripts/deployguard --help` to list commands.
+## Configuration
 
-## How It Works
+Settings come from the repository's `.env`. Process environment variables override them.
 
-1. **Cluster & Networking:** k3d runs k3s in Docker. Traefik exposes web services at `http://<name>.<CLUSTER_DOMAIN>:<INGRESS_PORT>`.
-2. **Builds:** Skaffold builds selected application and seeder contexts. DeployGuard imports its reported image tags into the named k3d cluster.
-3. **Local Git Source:** Each sync records generated charts and configuration in `.local/state/repository`. A Git commit identifies the exact version to deploy. Nginx serves this repository locally on SOURCE_PORT and inside the cluster at `http://deployguard-source-<cluster>/environment.git`. Your application repository is not committed or pushed.
-4. **Deployment:** Each declared entity becomes an ArgoCD Application, which tracks its configuration and health. ArgoCD deploys the recorded snapshot in dependency order. Deployment resources are continuously reconciled; test executions follow the explicit test command.
-5. **Local State:** `.local` contains the installed tools, caches, generated Git snapshots, and deployment inventory. Each checkout manages one environment and cluster/namespace pairing. Use separate checkouts for independent environments.
-6. **Secrets:** DeployGuard supplies declared credentials directly to Kubernetes Secrets. Generated configuration names those Secrets instead of containing their values. Vault and External Secrets Operator (ESO) are optional integrations. Keep credentials out of chart files, seed scripts, and mock mappings too.
+A **namespace** groups Kubernetes resources within a cluster. A **kubectl context** selects a cluster and connection credentials; DeployGuard targets `k3d-${CLUSTER_NAME}` explicitly.
 
-## Repository Layout
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| CLUSTER_NAME | control-plane-cluster | k3d cluster name |
+| NAMESPACE | deployguard | Namespace for application resources |
+| ARGO_APP_NAMESPACE | argocd | Namespace for ArgoCD and its Application objects |
+| CLUSTER_DOMAIN | 127.0.0.1.nip.io | Suffix for application hostnames |
+| API_PORT | 6443 | Kubernetes API port on localhost |
+| INGRESS_PORT | 8080 | HTTP ingress port on localhost |
+| SOURCE_PORT | 8081 | Local Git server port on localhost |
+| TIMEOUT_SECONDS | 600 | Default wait for each readiness or initialization check |
 
-```text
-README.md                 Overview and workflow
-deployguard.yaml          Your local environment topology
-.env.example              Local configuration example
-pyproject.toml            Tool dependencies, extras, command and version pins
-scripts/deployguard       Command entry point and local installation
-scripts/core/             DeployGuard command implementation
-platform/charts/          Reusable workload charts
-platform/dependencies/    Local infrastructure charts
-platform/config/          Topology schema and ArgoCD settings
-services/                 Demo applications
-mocks/                    Demo mappings
-seeds/<name>/             Seed script and its runtime files
-tests/unit/               CI unit and chart checks
-tests/e2e-tests/           Demo integration suite
-tests/platform-fixture/   CI sample topology and applications
-docs/                     User guides
-.github/workflows/        CI assessment
-.local/                   Ignored generated content only
+Use your configured domain and port in place of the default URLs throughout these guides. Each checkout manages one environment. A separate checkout, cluster name, and free ports are needed for an independent environment.
+
+## How deployment works
+
+DeployGuard reads the topology, selects the requested services and prerequisites, and coordinates these tools:
+
+| Component | Role |
+| --- | --- |
+| Docker, k3d, and k3s | Docker runs the cluster nodes; k3d manages them; k3s is the Kubernetes distribution inside them. |
+| Skaffold | Builds images from selected local application folders and reuses its build cache. |
+| Helm | Renders charts, packages of Kubernetes resource templates. Helm installs ArgoCD and ESO; ArgoCD uses it to render application charts. |
+| ArgoCD | Applies the recorded configuration in dependency order, monitors health, and corrects manual changes to deployment resources. |
+| Nginx | Serves the generated Git repository to ArgoCD over the local Docker network. |
+| Traefik | Routes incoming HTTP requests to application Services using their Ingress hostname rules. |
+| Vault (optional) | Stores application secrets; the test scenario runs it in development mode. |
+| External Secrets Operator (ESO, optional) | Copies Vault values into Kubernetes Secrets for applications to consume. |
+
+```mermaid
+flowchart LR
+    Source["Source and Dockerfiles"] --> Build["Skaffold build"]
+    Topology["Topology"] --> Sync["DeployGuard sync"]
+    Sync --> Build
+    Build --> Import["k3d image import"]
+    Sync --> Git["Generated Git served by Nginx"]
+    Git --> Argo["ArgoCD renders Helm charts"]
+    Import --> Workloads["k3s workloads"]
+    Argo --> Workloads
+    Browser["Browser or curl"] --> HTTP["Traefik"]
+    HTTP --> Workloads
 ```
 
-The single entry point is `./scripts/deployguard`: install, setup, bootstrap, sync, verify, test, validate, doctor, list-tests, clear-scenario, check, and runner-only assess.
+Each declared service, dependency, mock, seed, or secret store becomes an ArgoCD Application: an object identifying the configuration to deploy and monitor. The scenario's databases and message brokers are dependencies your own topology can choose or omit.
 
-## Inspecting Failures
+Generated Git snapshots stay under `.local/state/repository`; your application repository is not committed or pushed. Declared Secret values go directly to Kubernetes. The inventory under `.local/state` records the last selection and deployment revisions for verification. Installed tools and caches also stay under `.local`.
 
-Reconciliation failures report the requested revision and ArgoCD Application status. Inspect the selected cluster with the installed kubectl:
+Application initialization runs on deployment syncs. Shared seeds run when their inputs change. Tests run through the test command. See [initialization](seeds.md) and [tests](tests.md) for details.
+
+## Use your own application
+
+Use the [service guide](services.md) to understand the existing backend, gateway, and workers before adapting their configuration to your application.
+
+Replace the bundled topology with your own, or select another file with `--topology` or `TOPOLOGY_FILE`. Paths inside a topology are relative to its directory; a service's `env_file` is relative to its build context.
+
+Keep the environment name unchanged within an existing checkout's generated state. Use a separate checkout, cluster name, and free ports for an independent environment.
+
+The topology schema is `platform/config/topology.schema.json`. `apiVersion` is optional and defaults to `deployguard/v1`; `name` defaults to `deployguard`. Validation rejects unknown fields, missing references, and dependency cycles.
+
+## Inspect a failure
+
+These commands use the tools installed by DeployGuard and target the default cluster:
 
 ```bash
 .local/bin/kubectl --context k3d-control-plane-cluster -n argocd get applications
 .local/bin/kubectl --context k3d-control-plane-cluster -n deployguard get pods
 ```
 
-Use your configured context and namespaces when they differ. After correcting the configuration or source, rerun sync. See [the demo inspection commands](test-scenario.md#inspecting-the-local-environment) for logs, events, and dependency access.
+Read the failing application's diagnostics and pod status. For example, `OOMKilled` indicates an out-of-memory termination; a larger wait will not resolve a container repeatedly running out of memory. After correcting source or configuration, sync again.
 
-## Next Steps
+More [inspection commands](test-scenario.md#inspect-the-environment) are available in the test scenario guide.
 
-- [Explore the Test Scenario](test-scenario.md)
-- [Configure Services](services.md)
-- [Add Dependencies](dependencies.md)
-- [Mock External APIs](mocks.md)
-- [Run E2E Tests](tests.md)
-- [Initialize Data](seeds.md)
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `deployguard.yaml` | Bundled test scenario topology; use another topology for your own environment |
+| `.env.example` | Example host settings and local credentials |
+| `pyproject.toml` | Python dependencies and tool version pins |
+| `scripts/deployguard` | Command entry point |
+| `scripts/core/` | Command implementation |
+| `platform/charts/` | Shared charts for applications, mocks, seeds, and tests |
+| `platform/dependencies/` | Local Kafka and RabbitMQ charts |
+| `platform/config/` | Topology schema and ArgoCD settings |
+| `services/`, `mocks/`, `seeds/` | Bundled test scenario inputs |
+| `tests/e2e-tests/` | Test scenario integration suite |
+| `tests/platform-fixture/` | Separate environment used by CI lifecycle tests |
+| `tests/unit/` | Unit and chart checks |
+| `.github/workflows/` | CI workflow |
+| `.local/` | Ignored tools and generated state |
+
+Next: [run your own services](services.md), [add dependencies](dependencies.md), or [understand CI](tests.md#what-ci-checks).

@@ -1,72 +1,86 @@
-# External Dependencies & Ecosystem
+# Databases and other dependencies
 
-DeployGuard deploys databases, message brokers, and other tools through Helm charts managed by ArgoCD. Message brokers such as Kafka and RabbitMQ pass events or queued tasks between applications. Dependencies use their chart images and are not built from your application source.
+A dependency is software supplied by a Helm chart. The [test scenario topology](../deployguard.yaml) contains remote charts for PostgreSQL, Redis, Vault, and SeaweedFS, plus local charts for Kafka and RabbitMQ.
 
-## The Core Concept
+## Read a remote chart declaration
 
-Declare dependencies under `dependencies`. Choose an exact-version remote chart or a local chart containing `Chart.yaml`. Local paths and values files resolve relative to the topology. ArgoCD fetches remote charts; local charts are copied into generated Git snapshots.
+The scenario's PostgreSQL entry includes:
 
 ```yaml
-secrets:
-  - name: database-credentials
-    values: {password: DATABASE_PASSWORD}
-dependencies:
-  - name: postgres
-    repo: https://charts.bitnami.com/bitnami
-    chart: postgresql
-    version: "18.8.13"
-    set:
-      - fullnameOverride=postgres
-      - architecture=standalone
-      - auth.existingSecret=database-credentials
-      - auth.secretKeys.adminPasswordKey=password
-    values:
-      primary:
-        persistence: {size: 100Mi}
+- name: postgres
+  repo: https://charts.bitnami.com/bitnami
+  chart: postgresql
+  version: "18.8.13"
 ```
 
-Pin exact chart versions; floating versions and ranges are rejected. Dotted and indexed `set` keys use native Helm parameters. A `values_file` supplies a YAML mapping, overlaid with inline `values`: inline entries replace top-level keys rather than recursively merging them. Explicit `set` parameters take final precedence.
+Its `set` entries choose standalone mode, a persistent volume, and the existing `platform-bootstrap-secrets` Secret. Read the complete entry in `deployguard.yaml`; the excerpt above is not a standalone topology.
 
-## Required Assumptions & Constraints
+After [setup and bootstrap](get-started.md), deploy this dependency and inspect its Service:
 
-1. Dependencies deploy charts; DeployGuard does not search them for Dockerfiles.
-2. Declare prerequisites with `depends_on`, including other charts or seeds.
-3. Local chart `file://` subcharts are copied recursively. Vendor remote subcharts into `charts/` first; sync does not edit source charts or run dependency updates there.
-4. Initialize application schemas with service hooks, and shared infrastructure with [platform seeds](seeds.md).
-5. Configure private Helm access through ArgoCD's native repository credentials.
+```bash
+./scripts/deployguard sync --focus postgres
+.local/bin/kubectl --context k3d-control-plane-cluster -n deployguard get service postgres
+```
 
-Use chart-native `existingSecret` options or Secret references for credentials. A credential in `set`, `values`, or a values file would enter generated Git history and is rejected when it matches a declared secret source. Keep credentials out of source chart files as well. Selected Deployment and StatefulSet consumers are rolled when their Secret versions change. Changing a Secret does not itself change a password stored inside a database; use the dependency's supported credential-update procedure. Third-party settings remain governed by each chart's documented API.
+Application pods connect to `postgres:5432` with user `postgres`, database `postgres`, and the password configured in `.env`. Adding a database does not create your application's schema; the backend's [initialization](seeds.md) does that.
 
-## Built-In Local Kafka Design
+Remote charts need an exact `version`. ArgoCD fetches them; configure private chart access through [ArgoCD repository credentials](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/).
 
-The committed `platform/dependencies/confluent-kafka-chart` runs the demo's single-node Confluent Kafka broker in KRaft mode with image version `8.0.6`. It exposes `kafka:9092`, disables service-link environment injection, and uses ephemeral `emptyDir` storage. It provides local development messaging, without production durability.
+## Read a local chart declaration
 
-## Built-In Local RabbitMQ
+Kafka uses the committed chart at [platform/dependencies/confluent-kafka-chart](../platform/dependencies/confluent-kafka-chart):
 
-The committed `platform/dependencies/rabbitmq-instance-chart` runs the demo's single-node `rabbitmq:3-management` instance with ephemeral storage. It reads its password from a Kubernetes Secret and uses native RabbitMQ readiness diagnostics. The Service is `rabbitmq`, exposing AMQP on port 5672 and management on port 15672.
+```yaml
+- name: kafka
+  path: platform/dependencies/confluent-kafka-chart
+```
 
-## Demo Object Storage
+Paths resolve relative to the topology file and must contain `Chart.yaml`. The full entry also sets its image version and heap size. Use `depends_on` when a chart needs another dependency or seed first.
 
-The demo uses [SeaweedFS Community Edition](https://github.com/seaweedfs/seaweedfs) (Apache 2.0) through its upstream Helm chart. Its all-in-one mode runs storage and the S3 gateway in one pod. The chart version and multi-architecture project image digest are pinned in `deployguard.yaml`.
+Local `file://` subcharts are copied with their parent. Vendor remote subcharts into `charts/` before syncing; DeployGuard does not run dependency updates in your source directories.
 
-The S3 endpoint is `http://seaweedfs-all-in-one:8333`. SeaweedFS reads `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from `platform-bootstrap-secrets` as AWS credential environment variables, which enable authenticated S3 access. Set these values in `.env`; the applications and Vault seed use the same credentials. Data uses `emptyDir` storage and is lost when the pod is replaced. Reports use path-style requests and Signature Version 4 presigned URLs.
+## Values and credentials
 
-These are optional local dependencies. Other topologies can choose different native charts or tools.
+Chart values are applied in this order:
 
-## Platform Ecosystem & Observability
+1. `values_file`: a YAML mapping, relative to the topology.
+2. `values`: inline entries replace matching **top-level** keys from that file.
+3. `set`: Helm parameters take final precedence.
 
-With the default configuration and full demo selected:
+For example, inline `values.primary` replaces the whole `primary` entry from `values_file`. The two mappings are not recursively merged. Individual settings, such as `auth.existingSecret`, belong to the chart's API.
 
-- **ArgoCD Dashboard:** `http://argocd.127.0.0.1.nip.io:8080`, username admin.
-- **Dozzle:** `http://dozzle.127.0.0.1.nip.io:8080`, for live pod logs.
-- **Kafbat UI:** `http://kafka-ui.127.0.0.1.nip.io:8080`, for topics and events.
+Use chart-native Secret references for credentials. Generated values enter Git history; sync rejects values matching declared Secret sources. Review source charts and files for credentials too.
 
-Adjust the domain and port for your settings. Dozzle and Kafbat are ordinary demo dependencies, excluded from a fresh `--focus e2e-tests` deployment.
+Sync restarts selected Deployment and StatefulSet consumers when referenced Secret versions change. Changing a Secret does not change a password already stored inside a database; follow the chart's rotation procedure.
 
-From the repository root, retrieve the ArgoCD initial password using the installed kubectl:
+## Storage and endpoints in the test scenario
+
+| Component | Address inside the application namespace | Storage |
+| --- | --- | --- |
+| PostgreSQL | `postgres:5432` | Persistent volume |
+| Redis | `redis-master:6379` | Persistent volume |
+| Kafka | `kafka:9092` | Temporary pod storage |
+| RabbitMQ | `rabbitmq:5672` | Temporary pod storage |
+| SeaweedFS S3 API | `http://seaweedfs-all-in-one:8333` | Temporary pod storage |
+
+SeaweedFS uses the local S3 credentials in `.env`; no AWS account is needed. Vault runs in development mode. These are local test configurations; choose charts and persistence appropriate to your own environment.
+
+## Open the dashboards
+
+After a full scenario sync, these default URLs are available:
+
+| Tool | URL | Purpose |
+| --- | --- | --- |
+| ArgoCD | [argocd.127.0.0.1.nip.io:8080](http://argocd.127.0.0.1.nip.io:8080) | Application status and resource details |
+| Dozzle | [dozzle.127.0.0.1.nip.io:8080](http://dozzle.127.0.0.1.nip.io:8080) | Pod logs |
+| Kafbat UI | [kafka-ui.127.0.0.1.nip.io:8080](http://kafka-ui.127.0.0.1.nip.io:8080) | Kafka topics and events |
+
+Adjust URLs for your configured domain and ingress port. A fresh `--focus e2e-tests` deployment excludes Dozzle and Kafbat UI.
+
+The ArgoCD username is `admin`. Retrieve its initial password with:
 
 ```bash
 .local/bin/kubectl --context k3d-control-plane-cluster -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 
-ArgoCD uses Helm to render application charts. Helm release listings show bootstrap releases such as ArgoCD and ESO; application workloads are managed through ArgoCD Applications.
+ArgoCD renders application charts with Helm and manages their resources. `helm list` shows bootstrap releases, not each application.

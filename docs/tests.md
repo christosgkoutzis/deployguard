@@ -1,41 +1,17 @@
-# Verification & Test Runner
+# Verify deployments and run tests
 
-DeployGuard verifies the selected environment and runs integration suites as Kubernetes Jobs on the cluster network.
+| Command | Purpose |
+| --- | --- |
+| `validate` | Check topology fields, files, references, and dependency order |
+| `sync` | Build, deploy, initialize, and verify readiness |
+| `verify` | Recheck the last selected deployment without rebuilding |
+| `test <name>` | Run a test program as a Kubernetes Job and check its result |
 
-## Test Archetype
+Sync already verifies readiness. A healthy endpoint or running worker does not prove the application flow works; the integration suite checks that separately.
 
-Declare a service with `type: test`. Its default context is `tests/<name>/`, or supply `build_path`. Declare every prerequisite the suite needs, including workers and mocks.
+## Run the test scenario's suite
 
-```yaml
-services:
-  - name: integration-tests
-    type: test
-    build_path: ./test-suites/integration
-    depends_on: [sample-api, queue-consumer, external-api-mock]
-    env:
-      - TARGET_URL=http://sample-api-service:80
-    timeout: 600
-```
-
-Declare the referenced entities in the same topology. Sync registers a suspended Job without a readiness probe, Service, or Ingress. A successful deployment does not imply successful test execution.
-
-Keep test data preparation inside the test program or its entry point. Test services do not support `init_command` or `INIT_COMMAND`; validation rejects these settings.
-
-## Running Verification Checks
-
-```bash
-./scripts/deployguard verify
-```
-
-Verification reads `.local/state/inventory.json`, confirms the topology has not changed since sync, and checks the last selected entities. It waits for the requested ArgoCD revisions, healthy child Applications, completed platform seeds, Deployment rollout, and ingress health for web services and mocks. Dependency health covers the resources ArgoCD assesses, including PVCs. Workers need Deployment readiness without HTTP.
-
-Sync verifies automatically; the separate command rechecks later. Retained unselected applications do not block the selected deployment; their own health status remains visible in ArgoCD. Selected deployment applications must reach the requested revision and pass their health checks. Test Job outcomes are checked by the test command and do not block deployment verification.
-
-After a failed sync, correct the configuration or source and run sync again. DeployGuard coordinates pending ArgoCD work with the newly requested snapshot.
-
-## Running Test Suites
-
-For the bundled demo:
+After [setup and bootstrap](get-started.md):
 
 ```bash
 ./scripts/deployguard list-tests
@@ -43,33 +19,49 @@ For the bundled demo:
 ./scripts/deployguard test e2e-tests
 ```
 
-Each execution creates a new run ID in the generated snapshot. ArgoCD replaces the Job, and the runner waits for that Job's unique identity before following logs. Success requires `Complete=True` on that same Job. Failed Jobs, removed or replaced executions, and timeouts return nonzero status; Running pods and previously completed Jobs cannot satisfy it. Test Applications disable automatic sync retries and self-healing, and test Jobs use zero retries. Repeat the test command to rerun a suite, including after a failed execution. Sync alone registers suspended Jobs.
+The suite checks backend and mock responses, greeting approval and cache reads, search indexing, and a signed CSV download. Success ends with `e2e-tests Job completed`. See the [test scenario](test-scenario.md) for the request flow.
 
-For your own suite, replace `e2e-tests` with its declared name. Tests must be selected in the last sync. The runner verifies that suite's prerequisites and reuses its deployed chart, configuration, and image. Other application revisions and test executions remain unchanged. Source or environment edits need another sync before execution.
+## Use the existing suite as a reference
 
-## CI/CD Guardrails
+The suite lives in [tests/e2e-tests](../tests/e2e-tests). Its [Dockerfile](../tests/e2e-tests/Dockerfile) installs dependencies and starts pytest; [test_e2e.py](../tests/e2e-tests/test_e2e.py) contains the checks.
 
-The workflow runs on pull requests targeting master, pushes to master, and manual dispatch. It checks the demo and an independent custom topology on disposable Linux amd64 runners.
+Its entry in [deployguard.yaml](../deployguard.yaml) uses `type: test`. `depends_on` includes the gateway, backend, workers, and mock; `env` supplies the gateway and storage addresses. Test programs handle their own data preparation. Validation rejects `init_command` and `INIT_COMMAND` on test services.
 
-| Job | Coverage |
+For another suite, supply its Dockerfile and test program, then declare its name and every prerequisite. Its default build path is `tests/<name>`; `build_path` can override it.
+
+## Repeat tests and interpret results
+
+Sync registers suspended test Jobs without executing them. A suite must be selected by the last sync before it can run.
+
+Each `test` command verifies its prerequisites and starts a new execution. Success requires that same Job to complete. Failed, deleted, replaced, or timed-out executions return an error; a previous successful Job cannot satisfy a new run. Log streaming alone does not decide success.
+
+Tests have zero retries, with ArgoCD automatic retries and self-healing disabled. Run `test` again to repeat a suite. Other test executions and application revisions remain unchanged.
+
+After source, environment, or topology edits, sync before testing. Tests reuse deployed images. `verify` checks recorded configuration and readiness; it does not detect source edits. Retained, unselected applications do not block selected checks.
+
+## What CI checks
+
+The [workflow](../.github/workflows/cluster-integration.yml) runs on pull requests to master, pushes to master, and manual dispatch.
+
+| Job | Purpose |
 | --- | --- |
-| `static-and-unit-tests` | Syntax, schema and topology validation, unit tests, and Helm rendering; includes isolation, locking, cleanup, lifecycle policies and configuration rules |
-| `end-to-end-tests` | The demo's HTTP, database, messaging, cache, search and signed CSV download flows; Vault/ESO propagation, deployment selection, generated Git credential scans, and repeated sync/test execution |
-| `deployment-lifecycle-tests` | An operator-free custom topology: paths, ports, environment and Secret handling, source and mock updates, seeds, focus retention/pruning, isolated Jobs, failures and recovery |
-| `all-tests-passed` | Collects the other jobs' results and fails if any failed, was cancelled or was skipped; runs no tests itself |
+| `static-and-unit-tests` | Checks syntax and topology rules, runs unit tests, and renders Helm charts without a cluster. |
+| `end-to-end-tests` | Deploys the test scenario and checks its application flows, Vault/ESO propagation, and repeated sync/test runs. |
+| `deployment-lifecycle-tests` | Uses a separate sample environment to check updates, secrets, initialization, mocks, selection, pruning, test execution, and recovery. |
+| `all-tests-passed` | Requires all three jobs to succeed; runs no additional tests. |
 
-End-to-end tests bootstrap one cluster, deploy and verify the focused environment, and run its suites and repeated sync/test checks. Only after those steps pass does the job expand to the full topology and repeat verification and tests. The full stage reuses the cluster and build cache. A focused-stage failure skips full expansion; failure diagnostics and cleanup still run.
+End-to-end tests create one cluster: the focused scenario must pass before the full scenario is deployed and tested on the same cluster. The lifecycle job uses its own cluster to check a topology without Vault or ESO.
 
-Each functional job bootstraps its own cluster once. The demo includes Vault and ESO; the custom topology runs without them. Failure tests check the actual failed execution and subsequent recovery. Initialization failure checks require the new hook's expected exit code and a deployment error; unexpected results include Application operation diagnostics even when health appears successful. CI also checks that a changed Vault value reaches a restarted container, then restores it. Failed jobs collect cluster diagnostics before cleanup. `./scripts/deployguard assess` runs only in GitHub Actions.
+Lifecycle checks deliberately introduce a crashing worker, an unavailable chart, failed initialization, a failed test, and an unknown focus name. Each command must fail as expected, then recovery must succeed. The scenario checks also change a Vault value, verify container propagation, and restore it. Both functional jobs collect failure diagnostics before cleanup.
 
-Configure branch protection to require `all-tests-passed` if you want merges gated on the complete test workflow. A green run demonstrates this coverage on the tested toolchain and runner; it cannot prove every third-party chart, application, architecture, or host configuration works.
+CI covers Linux amd64 and the supplied environments, not every chart, application, or host. Require `all-tests-passed` in branch protection to gate merges on the full workflow.
 
-## Local Static Checks
+## Check syntax locally
 
-After installation, run:
+After installation:
 
 ```bash
 ./scripts/deployguard check
 ```
 
-The checker reads syntax/schema without importing applications, running services, or contacting a cluster. CI installs the assessment dependencies with `./scripts/deployguard install --assessment` and runs unit tests and offline Helm chart checks. See [Test Scenario](test-scenario.md) to deploy and verify the included demo.
+This reads code and schema syntax without starting applications or contacting a cluster. It does not check Markdown examples or run tests. CI separately runs unit tests and Helm rendering. `./scripts/deployguard assess` is reserved for GitHub Actions.

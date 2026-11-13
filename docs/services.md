@@ -1,111 +1,71 @@
-# Services & Workers
+# Services and workers
 
-Declare application services and background workers under `services` in your topology. DeployGuard builds their Docker contexts and deploys them with the appropriate chart.
+The [test scenario](test-scenario.md) already contains web services and workers. Use their entries in [deployguard.yaml](../deployguard.yaml) and their Dockerfiles as references. Configuration excerpts below belong to that file; they are not replacement topologies.
 
-## Required Service Location & Files
+## Follow an HTTP request
 
-1. Application services default to `services/<name>/`; test services default to `tests/<name>/`.
-2. Custom build_path values point to local Docker contexts relative to the topology.
-3. Every context must contain a file named `Dockerfile`.
-4. Names must be unique lowercase DNS labels of at most 40 characters.
-
-## Workload Archetypes
-
-- webservice (default): Deployment, internal Service, Ingress, and HTTP readiness probe.
-- worker: Deployment without an HTTP probe, Service, or Ingress.
-- test: Suspended Job executed through the [test runner](tests.md).
-
-## Required Runtime Shape
-
-Applications use a single-container stateless Deployment, or a single-container test Job. Web applications must listen on all interfaces and expose a successful HTTP health endpoint. Workers must remain running without needing an HTTP port.
+The [Ruby gateway](../services/ruby-gateway/main.rb) calls the [Python backend](../services/python-backend/main.py). Its topology entry is:
 
 ```yaml
-services:
-  - name: sample-api
-    build_path: ./backend/sample-api
-    port: 3000
-    health_endpoint: /api/status
-    resources:
-      requests: {cpu: 100m, memory: 128Mi}
-      limits: {memory: 256Mi}
-  - name: queue-consumer
-    type: worker
-    build_path: ./background/consumer
-    depends_on: [sample-api]
+- name: ruby-gateway
+  depends_on:
+    - python-backend
+  env:
+    - BACKEND_URL=http://python-backend-service:80
 ```
 
-Web service defaults are port 8000, health path /health, and one replica. Their internal Service is `<name>-service` on port 80; other pods use `http://<name>-service:80`. Web service and worker Deployments are named `<name>-workload`. Workers have no Service or Ingress.
+After [setup and bootstrap](get-started.md), deploy the backend and its prerequisites, then request its message:
 
-## Customizing Environment Variables
+```bash
+./scripts/deployguard sync --focus python-backend
+curl --fail http://python-backend.127.0.0.1.nip.io:8080/message
+```
 
-An env_file is parsed as dotenv data, not sourced as shell code. It resolves inside the build context. Inline env entries override the file; surrounding quotes are accepted. Placeholders resolve from the repository .env and process environment, with process variables taking precedence. Missing variables and duplicate inline keys are errors.
+The response contains `"message":"Hello from python-backend!"`. This selection does not include the gateway or workers. Use `sync --focus e2e-tests` for the complete request flow.
+
+The backend's [Dockerfile](../services/python-backend/Dockerfile) starts it on `0.0.0.0:8000`. DeployGuard creates a Deployment to keep its pod running, a Service on port 80 for cluster access, and an Ingress rule for its hostname. A readiness probe checks `/health` before the pod receives Service traffic.
+
+Built-in service Deployments are named `<name>-workload`; web Services are `<name>-service`. For example, the backend uses `python-backend-workload` and `python-backend-service`.
+
+## Run background work
+
+The scenario declares `python-worker` and `report-worker` with `type: worker`. They consume Kafka events and RabbitMQ tasks respectively. See their [Kafka worker](../services/python-worker/worker.py) and [report worker](../services/report-worker/report-worker.py) implementations.
+
+Workers get a Deployment without an HTTP probe, Service, or Ingress. A ready worker pod does not prove that it processed a message; the [integration suite](tests.md) checks that behavior.
+
+## Configure environment and secrets
+
+`BACKEND_URL` above is ordinary configuration. Use `env_file` for a dotenv file relative to the service's build context; inline `env` takes precedence. Dotenv files are parsed as data, not executed as shell scripts. `${VARIABLE}` placeholders read the checkout's `.env` or process environment. Missing variables, duplicate inline keys, and names repeated in both `env` and `secret_env` are rejected.
+
+The backend uses `secret_env` to read Kubernetes Secrets, for example:
 
 ```yaml
-services:
-  - name: sample-api
-    build_path: ./backend/sample-api
-    env_file: .env.development
-    env:
-      - APP_MODE=local
-      - PUBLIC_URL=http://sample-api.${CLUSTER_DOMAIN}:${INGRESS_PORT}
-    command: [python, server.py]
-    args: [--verbose]
+secret_env:
+  POSTGRES_PASSWORD:
+    name: platform-bootstrap-secrets
+    key: POSTGRES_PASSWORD
 ```
 
-Command and args are container argument arrays; repeated flags and arguments are allowed. For web services and workers, an init_command or INIT_COMMAND env entry defines an initialization hook; see [Seeds](seeds.md). Test programs handle their own preparation; validation rejects these initialization settings for test services.
+The topology's `secrets` section maps each Secret key to a host variable from `.env`. `env_from` imports every key from a declared Secret. Keep credentials out of ordinary environment entries and chart values, which enter generated Git snapshots. Secret references do not encrypt `.env` or other local files.
 
-## Secrets Management
+The backend also declares `external_secret` to read `deployguard/python-backend` through the `vault-backend` SecretStore. The SecretStore tells External Secrets Operator (ESO) how to connect to Vault; the generated ExternalSecret specifies which Vault KV v2 path to copy into a Kubernetes Secret. Vault support is optional; an already initialized Vault does not need a seeder.
 
-Services that do not need secrets require no Vault or ESO configuration. For local credentials, declare a Kubernetes Secret and refer to its keys:
+Use a namespace-qualified Vault address, as the scenario does, because ESO runs in `external-secrets`. On sync, DeployGuard refreshes managed ExternalSecrets and restarts selected Deployments or StatefulSets when referenced Secret versions change. Run sync after changing a Vault value to update running containers.
 
-```yaml
-secrets:
-  - name: database-credentials
-    values:
-      password: DATABASE_PASSWORD
-services:
-  - name: sample-api
-    secret_env:
-      DB_PASSWORD: {name: database-credentials, key: password}
-```
+## Adapt the pattern to your application
 
-Set DATABASE_PASSWORD in your .env or terminal environment. DeployGuard writes its value directly to the Kubernetes Secret; generated deployment configuration contains only the Secret name and key. `env_from: [database-credentials]` imports every key. Do not duplicate a variable in env and secret_env.
+Supply your source and a Dockerfile, then declare the service, its dependencies, and its settings. The [topology schema](../platform/config/topology.schema.json) lists supported fields.
 
-External Secrets Operator (ESO) reads credentials from Vault into Kubernetes Secrets for your services. To use Vault KV v2, declare a secret store and service binding:
+| Setting | Behavior |
+| --- | --- |
+| `build_path` | Directory relative to the topology; defaults to `services/<name>` or `tests/<name>` for tests |
+| `type` | `webservice` by default; also `worker` or `test` |
+| `port` / `health_endpoint` | Web container port and HTTP readiness path; defaults are 8000 and `/health` |
+| `command` / `args` | Arrays overriding the image entry point and arguments; shell operators need an explicit shell |
+| `resources` | Kubernetes CPU, memory, and ephemeral-storage requests and limits |
 
-```yaml
-secrets:
-  - name: vault-token
-    values: {token: VAULT_ROOT_TOKEN}
-secret_stores:
-  - name: vault-store
-    server: http://vault.${NAMESPACE}.svc.cluster.local:8200
-    path: secret
-    token_secret: {name: vault-token, key: token}
-    depends_on: [vault-seeder]
-services:
-  - name: sample-api
-    external_secret:
-      store: vault-store
-      path: applications/sample-api
-```
+Names must be unique lowercase DNS labels of at most 40 characters. Web services must listen on all interfaces and return a successful health response.
 
-Use a namespace-qualified Vault address: ESO connects from the `external-secrets` namespace, so a short hostname such as `vault` does not resolve to the application namespace. `${NAMESPACE}` uses your configured application namespace.
+The built-in charts run one replica with one container. Use a [dependency chart](dependencies.md) for other workload shapes or advanced networking. Application fields do not configure prebuilt images, remote source checkout, custom Dockerfile names, build arguments, or build secrets.
 
-Declare vault-seeder and its Vault prerequisite in the same topology. The store dependency is added automatically to the service graph. ESO extracts the path into `<name>-secret`; startup waits for successful synchronization. Rerun bootstrap when adding stores to an operator-free cluster.
-
-On sync, DeployGuard refreshes managed ExternalSecrets and rolls selected Deployments and StatefulSets when their referenced Secret versions change. Vault changes require another sync to reach running containers; DeployGuard does not add a background restart controller.
-
-Kubernetes Secrets and Vault dev mode serve the disposable local environment. Secret references do not encrypt local files or turn this into a production secrets platform.
-
-## Explicitly Unsupported Cases
-
-1. Multi-container pods or workloads requiring sidecars.
-2. Stateful application clustering through service fields; use a dependency chart.
-3. Web services without an HTTP health endpoint.
-4. Advanced ingress, mTLS, or network policy configuration through service fields.
-5. Direct remote Git onboarding; build input must be a local folder.
-6. Custom Dockerfile names, build arguments, or build secrets through topology fields. Runtime Secret references apply to deployed containers, not image builds.
-7. Prebuilt application images through service fields; services are built from their local contexts. Dependency charts can use their own image references.
-
-Use a custom dependency chart for Kubernetes shapes outside these archetypes.
+After source or configuration edits, run `sync` again. See [initialization](seeds.md) for migrations and [tests](tests.md) for test Jobs.

@@ -50,7 +50,7 @@ get '/' do
         </div>
 
         <hr/>
-        <h3>4. Enterprise Export (SQS & S3)</h3>
+        <h3>4. CSV Export (RabbitMQ &amp; S3)</h3>
         <form action="/report/generate" method="POST" style="display:inline;">
           <button type="submit">1. Generate CSV Report (Async)</button>
         </form>
@@ -75,7 +75,7 @@ end
 post '/report/generate' do
   uri = URI("#{BACKEND_URL}/report/generate")
   Net::HTTP.post(uri, "")
-  redirect '/?db_message=Report+generation+queued+in+SQS'
+  redirect '/?db_message=Report+generation+queued+in+RabbitMQ'
 end
 
 get '/report/download' do

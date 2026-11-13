@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="python">
 </p>
 
-DeployGuard builds and runs services and their dependencies on your machine. For example, you can test an API that writes to a database, sends a message to a worker, and calls a mocked HTTP API.
+DeployGuard builds and runs local Kubernetes environments containing application services, background workers, dependencies deployed from Helm charts, HTTP mocks, initialization jobs, and integration tests. Use it to validate service interactions and explore GitOps deployment, dependency ordering, initialization, and secrets management.
 
 A **topology** is a YAML file describing the services, dependencies, configuration, and startup relationships of an environment. The included topology is `deployguard.yaml`. Run `sync` to build and deploy it, then run a test suite inside the cluster. You supply the application source, Dockerfiles, configuration, and test data.
 
@@ -59,15 +59,14 @@ DeployGuard runs locally. It does not discover dependencies, import Compose file
 
 ## Guides
 
-| Task | Guide |
-| --- | --- |
-| Install tools and run the test scenario | [Get started](docs/get-started.md) |
-| Understand and use the test scenario | [Test scenario](docs/test-scenario.md) |
-| Run your own API or worker | [Services](docs/services.md) |
-| Add a database or Helm chart | [Dependencies](docs/dependencies.md) |
-| Replace an HTTP API with a mock | [Mocks](docs/mocks.md) |
-| Initialize shared data or run migrations | [Initialization](docs/seeds.md) |
-| Write tests and understand CI | [Tests](docs/tests.md) |
+- 🚀 **[Get started](docs/get-started.md)**: Install tools and run the test scenario.
+- ⚙️ **[How deployment works](docs/get-started.md#how-deployment-works)**: Components, Git snapshots, and deployment flow.
+- 🔎 **[Test scenario](docs/test-scenario.md)**: Understand the request flow and inspect the running environment.
+- 📦 **[Services & Workers](docs/services.md)**: Application configuration, build paths, environment variables, and secrets.
+- 🐘 **[Dependencies](docs/dependencies.md)**: Databases, remote and local Helm charts, and dashboards.
+- 🤡 **[Mocks](docs/mocks.md)**: WireMock responses and service dependencies.
+- 🌱 **[Initialization](docs/seeds.md)**: Shared seeds and application migrations.
+- 🧪 **[Tests](docs/tests.md)**: Test suites, deployment verification, and CI coverage.
 
 CI runs static and unit checks, the test scenario's integration tests, and deployment lifecycle checks on a separate sample environment. Coverage and platform limits are described in the tests guide.
 

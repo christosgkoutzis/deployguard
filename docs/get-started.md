@@ -120,38 +120,52 @@ Use your configured domain and port in place of the default URLs throughout thes
 
 ## How deployment works
 
-DeployGuard reads the topology, selects the requested services and prerequisites, and coordinates these tools:
+After `setup` creates the cluster and `bootstrap` installs ArgoCD and optional External Secrets Operator (ESO), run `./scripts/deployguard sync` to deploy the topology. Run it again after source or configuration changes; edits alone do not trigger deployment.
+
+### What happens during sync
+
+Read from top to bottom. Each arrow means **the next step** in a successful sync.
+
+```mermaid
+flowchart TD
+    Run["1. You run sync"] --> Validate["2. DeployGuard checks the topology and settings<br/>and selects services and their prerequisites"]
+    Validate --> Build["3. Skaffold builds container images from the selected code<br/>and k3d loads them into the cluster"]
+    Build --> Record["4. DeployGuard records deployment instructions<br/>using those image versions in its separate local Git repository"]
+    Record --> Deploy["5. ArgoCD reads that snapshot through Nginx<br/>renders charts with Helm and applies Kubernetes resources"]
+    Deploy --> Ready["6. DeployGuard waits for initialization and health checks<br/>then reports success"]
+```
+
+Prerequisites deploy before the components that need them. DeployGuard checks requested revisions, initialization and seed results, application health, rollouts, and web/mock HTTP endpoints. Failed checks or timeouts prevent success. These checks establish readiness; tests check application behavior separately.
+
+### What each component does
 
 | Component | Role |
 | --- | --- |
-| Docker, k3d, and k3s | Docker runs the cluster nodes; k3d manages them; k3s is the Kubernetes distribution inside them. |
-| Skaffold | Builds images from selected local application folders and reuses its build cache. |
-| Helm | Renders charts, packages of Kubernetes resource templates. Helm installs ArgoCD and ESO; ArgoCD uses it to render application charts. |
-| ArgoCD | Applies the recorded configuration in dependency order, monitors health, and corrects manual changes to deployment resources. |
+| Docker, k3d, and k3s | Docker runs the cluster nodes; k3d manages them; k3s provides Kubernetes inside them. Built images are imported directly, without a registry push. |
+| Skaffold | Packages application code and dependencies into container images, reusing cached builds. |
+| Helm | Renders charts, which are Kubernetes resource templates. Helm installs ArgoCD and optional ESO during bootstrap; ArgoCD uses Helm to render workload charts during deployment. |
+| ArgoCD | Tracks each component as an Application (a deployment record), grouped under an environment Application. Applies configuration in dependency order and keeps resources matched to it. |
 | Nginx | Serves the generated Git repository to ArgoCD over the local Docker network. |
-| Traefik | Routes incoming HTTP requests to application Services using their Ingress hostname rules. |
+| Traefik | Routes HTTP requests to web services using their Ingress hostname rules. |
+| WireMock | Serves HTTP responses defined by the topology's mock mappings. |
 | Vault (optional) | Stores application secrets; the test scenario runs it in development mode. |
-| External Secrets Operator (ESO, optional) | Copies Vault values into Kubernetes Secrets for applications to consume. |
+| ESO (optional) | Copies Vault values into Kubernetes Secrets for applications to consume. |
 
-```mermaid
-flowchart LR
-    Source["Source and Dockerfiles"] --> Build["Skaffold build"]
-    Topology["Topology"] --> Sync["DeployGuard sync"]
-    Sync --> Build
-    Build --> Import["k3d image import"]
-    Sync --> Git["Generated Git served by Nginx"]
-    Git --> Argo["ArgoCD renders Helm charts"]
-    Import --> Workloads["k3s workloads"]
-    Argo --> Workloads
-    Browser["Browser or curl"] --> HTTP["Traefik"]
-    HTTP --> Workloads
-```
+### After deployment
 
-Each declared service, dependency, mock, seed, or secret store becomes an ArgoCD Application: an object identifying the configuration to deploy and monitor. The scenario's databases and message brokers are dependencies your own topology can choose or omit.
+When you open an application URL, Traefik receives the HTTP request and forwards it through a Kubernetes Service to a ready web service pod. Workers and Jobs do not receive this ingress traffic.
 
-Generated Git snapshots stay under `.local/state/repository`; your application repository is not committed or pushed. Declared Secret values go directly to Kubernetes. The inventory under `.local/state` records the last selection and deployment revisions for verification. Installed tools and caches also stay under `.local`.
+Tests remain suspended until you run `test <name>`. That command verifies prerequisites, starts a new test Job execution, and requires it to complete successfully.
 
-Application initialization runs on deployment syncs. Shared seeds run when their inputs change. Tests run through the test command. See [initialization](seeds.md) and [tests](tests.md) for details.
+### State and initialization
+
+Snapshots stay under `.local/state/repository`; your application repository is not committed or pushed. They record the deployment configuration and image references. Remote dependency charts are fetched from the repositories in the topology.
+
+Declared Secret values go directly to Kubernetes. The inventory under `.local/state` records the last selection and deployment revisions; tools and caches also stay under `.local`.
+
+Initialization runs on selected syncs; shared seeds rerun when inputs change. See [initialization](seeds.md) and [tests](tests.md) for details.
+
+Source: [topology validation](../scripts/core/topology.py), [image builds](../scripts/core/builds.py), [generated configuration](../scripts/core/gitops.py), and [command execution and verification](../scripts/core/cli.py).
 
 ## Use your own application
 
